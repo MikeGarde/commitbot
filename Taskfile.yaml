@@ -1,0 +1,52 @@
+version: '3'
+
+vars:
+  BINARY_NAME: commitbot
+
+tasks:
+  run:simple:
+    desc: "Run commitbot in simple mode (no model, debug) using cargo run"
+    cmds:
+      - cargo run -- --no-model --debug
+
+  run:ask:
+    desc: "Run commitbot in interactive ask mode (no model, debug)"
+    cmds:
+      - cargo run -- --ask --no-model --debug
+
+  run:ask:real:
+    desc: "Run commitbot in interactive ask mode using real model"
+    env:
+      OPENAI_API_KEY: '{{.OPENAI_API_KEY | default .DEFAULT_OPENAI_API_KEY}}'
+    cmds:
+      - |
+        if [ -z "$OPENAI_API_KEY" ]; then
+          echo "OPENAI_API_KEY is not set. Set it or pass via env when running task."
+          exit 1
+        fi
+        cargo run -- --ask
+
+  install:local:
+    desc: "Install commitbot binary locally via cargo install --path ."
+    cmds:
+      - cargo install --path . --force
+
+  build:release:
+    desc: "Build optimized release binary"
+    cmds:
+      - cargo build --release
+
+  path:binary:
+    desc: "Show the path to the release binary"
+    cmds:
+      - echo "target/release/{{.BINARY_NAME}}"
+
+  publish:dry:
+    desc: "Dry-run crates.io publish to verify packaging"
+    cmds:
+      - cargo publish --dry-run
+
+  publish:
+    desc: "Publish crate to crates.io"
+    cmds:
+      - cargo publish
