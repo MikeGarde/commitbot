@@ -1,4 +1,4 @@
-# commitbot
+# Commit Bot
 
 **commitbot** is a Rust-based CLI tool that helps generate clear, structured Git commit messages using an LLM (such as OpenAI’s GPT models).  
 It can analyze your staged changes, summarize each file interactively, and produce a well-organized commit message describing the intent behind the changes.
@@ -9,10 +9,12 @@ It can analyze your staged changes, summarize each file interactively, and produ
 - Simple one-shot mode for fast commits.
 - Configurable model selection (e.g. `gpt-4o-mini`).
 
-> **⚠️ Privacy Notice**  
-> At this time, **commitbot** does not support using a local LLM model.  
-> When the `--model` option is enabled, your staged diffs are sent to the configured API provider (e.g., OpenAI) for analysis.  
-> Future versions will introduce support for specifying a custom API endpoint and integrating with self-hosted or alternative LLM providers to keep all processing local or at least internal.
+### ⚠️ Privacy Notice
+At this time, `commitbot` does not support using a local LLM model.
+When the `--model` option is enabled, your staged diffs are sent to the OpenAI for analysis. 
+
+Future versions will introduce support for specifying a custom API endpoint and integrating with self-hosted or 
+alternative LLM providers to keep all processing local or at least internal.
 
 ## Installation
 
@@ -35,7 +37,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 ### From Git (no manual clone)
 
 ```
-cargo install --git https://github.com/YOUR_USERNAME/commitbot --force
+cargo install --git https://github.com/mikegarde/commitbot --force
 ```
 
 ## Usage
@@ -67,9 +69,24 @@ For each file you can choose:
 
 After all files are classified, **commitbot** summarizes and generates a full commit message.
 
+### Pull Request Summaries
+
+`commitbot` can also generate clear, high-level **Pull Request descriptions** by summarizing the commit history between two branches.  
+Instead of sending an enormous diff to the model, it analyzes the **commit or PR messages** to produce a concise overview of the feature branch’s purpose and major changes.
+
+- It collects all commits between a **base** branch (such as `develop` or `main`) and the **feature** branch.
+- If multiple PR numbers are detected in commit messages (e.g., `#123`), `commitbot` groups them and references each PR in the summary.
+- Otherwise, it summarizes the commits directly.
+- The tool can also be forced into either mode with flags.
+
+```
+commitbot pr develop
+commitbot pr develop feat/ISSUE-201-registration
+```
+
 ### OpenAI / ChatGPT
 
-This needs your API Key as an environment variable.
+`commitbot` needs your API Key as an environment variable.
 
 ```
 export OPENAI_API_KEY="sk-..."
