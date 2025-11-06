@@ -1,6 +1,7 @@
 # Commit Bot
 
 **commitbot** is a Rust-based CLI tool that helps generate clear, structured Git commit messages using an LLM (such as OpenAI’s GPT models).  
+
 It can analyze your staged changes, summarize each file interactively, and produce a well-organized commit message describing the intent behind the changes.
 
 ## Features
@@ -11,12 +12,31 @@ It can analyze your staged changes, summarize each file interactively, and produ
 
 ### ⚠️ Privacy Notice
 At this time, `commitbot` does not support using a local LLM model.
-When the `--model` option is enabled, your staged diffs are sent to the OpenAI for analysis. 
+Your staged diffs are sent to OpenAI for analysis. 
 
 Future versions will introduce support for specifying a custom API endpoint and integrating with self-hosted or 
 alternative LLM providers to keep all processing local or at least internal.
 
+## Prove It!
+
+All [commit](https://github.com/MikeGarde/commitbot/commits/) & 
+[PR](https://github.com/MikeGarde/commitbot/pulls?q=is%3Apr+is%3Aclosed) 
+messages in this repo will be generated using `commitbot`. Although we should all eat our own dog food, we still 
+recommend the smell test before committing here or anywhere else!
+
 ## Installation
+
+### Prerequisites
+
+`commitbot` needs your OpenAI API Key as an environment variable.
+
+```
+export OPENAI_API_KEY="sk-..."
+```
+
+### Easy - Coming Soon
+
+Placeholder for downloading pre-built binaries.
 
 ### From source (local development)
 
@@ -82,14 +102,6 @@ Instead of sending an enormous diff to the model, it analyzes the **commit or PR
 ```
 commitbot pr develop
 commitbot pr develop feat/ISSUE-201-registration
-```
-
-### OpenAI / ChatGPT
-
-`commitbot` needs your API Key as an environment variable.
-
-```
-export OPENAI_API_KEY="sk-..."
 ```
 
 ## License
