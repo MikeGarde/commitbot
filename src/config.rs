@@ -7,6 +7,7 @@ use std::path::PathBuf;
 /// Final resolved configuration for commitbot.
 #[derive(Debug, Clone)]
 pub struct Config {
+    pub openai_api_key: String,
     pub model: String,
 }
 
@@ -22,14 +23,21 @@ impl Config {
         let file_cfg = load_file_config().unwrap_or_default();
 
         let model_cli = cli.model.clone();
+        let api_key_cli = cli.api_key.clone();
         let model_env = env::var("COMMITBOT_MODEL").ok();
+        let api_key_env = env::var("OPENAI_API_KEY").ok();
 
         let model = model_cli
             .or(model_env)
             .or(file_cfg.model)
             .unwrap_or_else(|| "gpt-5-nano".to_string());
 
-        Config { model }
+        let openai_api_key = api_key_cli
+            .or(api_key_env)
+            .or(file_cfg.openai_api_key)
+            .expect("OPENAI_API_KEY must be set via env var or CLI");
+
+        Config { model, openai_api_key }
     }
 }
 
@@ -37,6 +45,7 @@ impl Config {
 struct FileConfig {
     /// Default model to use when not provided via CLI or env.
     pub model: Option<String>,
+    pub openai_api_key: Option<String>,
 }
 
 /// Return `~/.config/commitbot.toml`

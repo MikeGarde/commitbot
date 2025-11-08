@@ -1,9 +1,11 @@
 use super::LlmClient;
-use crate::{FileChange, PrItem, PrSummaryMode};
+use crate::{FileChange};
+use crate::git::{PrItem, PrSummaryMode};
 use anyhow::{anyhow, Context, Result};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 /// Minimal request/response structs for OpenAI Chat Completions API.
 #[derive(Serialize)]
@@ -50,8 +52,13 @@ pub struct OpenAiClient {
 
 impl OpenAiClient {
     pub fn new(api_key: String, model: String) -> Self {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(90))
+            .build()
+            .expect("failed to build HTTP client");
+
         OpenAiClient {
-            client: Client::new(),
+            client,
             api_key,
             model,
         }
