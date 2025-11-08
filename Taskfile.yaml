@@ -92,8 +92,8 @@ tasks:
     interactive: true
     cmds:
       - sh devops/release.sh {{.VERSION}}
-      - publish:dry
-      - publish
+      - task: publish:dry
+      - task: publish
 
   publish:dry:
     desc: "Dry-run crates.io publish to verify packaging"
