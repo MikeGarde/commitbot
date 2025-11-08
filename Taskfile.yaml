@@ -4,6 +4,22 @@ vars:
   BINARY_NAME: commitbot
 
 tasks:
+  setup:
+    desc: "Setup development environment"
+    silent: true
+    status:
+      - rustup target list --installed | grep -q x86_64-apple-darwin
+      - rustup target list --installed | grep -q aarch64-apple-darwin
+    cmds:
+      - rustup target add x86_64-apple-darwin
+      - rustup target add aarch64-apple-darwin
+
+  test:
+    desc: "Run all tests"
+    cmds:
+      - cargo clippy --all-targets --all-features -- -D warnings
+      - cargo test --all-features
+
   run:simple:
     desc: "Run commitbot in simple mode (no model, debug) using cargo run"
     cmds:
@@ -32,14 +48,52 @@ tasks:
       - cargo install --path . --force
 
   build:release:
-    desc: "Build optimized release binary"
+    desc: "Build optimized release binary for the host"
+    silent: true
     cmds:
       - cargo build --release
+      - du -h target/release/{{.BINARY_NAME}}
 
-  path:binary:
-    desc: "Show the path to the release binary"
+  build:release:*:
+    desc: "Build release binaries for all targets and package into dist/"
+    vars:
+      VERSION: '{{index .MATCH 0}}'
+    silent: true
     cmds:
-      - echo "target/release/{{.BINARY_NAME}}"
+      - mkdir -p dist
+      - rm -f dist/commitbot-*.tar.gz
+      - |
+        set -euo pipefail
+
+        echo "Building release binaries..."
+        cargo build --release --target aarch64-apple-darwin
+        cargo build --release --target x86_64-apple-darwin
+
+        du -h target/aarch64-apple-darwin/release/commitbot
+        du -h target/x86_64-apple-darwin/release/commitbot
+
+        echo "Packaging into dist with version {{.VERSION}}..."
+
+        tar -C target/aarch64-apple-darwin/release \
+          -czf dist/commitbot-{{.VERSION}}-aarch64-apple-darwin.tar.gz \
+          commitbot
+
+        tar -C target/x86_64-apple-darwin/release \
+          -czf dist/commitbot-{{.VERSION}}-x86_64-apple-darwin.tar.gz \
+          commitbot
+
+        echo "Artifacts created:"
+        ls -lh dist
+
+  release:*:
+    desc: "Create a release by building and publishing to crates.io (requires VERSION arg)"
+    vars:
+      VERSION: '{{index .MATCH 0}}'
+    interactive: true
+    cmds:
+      - sh devops/release.sh {{.VERSION}}
+      - publish:dry
+      - publish
 
   publish:dry:
     desc: "Dry-run crates.io publish to verify packaging"
