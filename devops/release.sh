@@ -142,7 +142,7 @@ rm -f "$CARGO_BAK"
 if git diff --quiet -- Cargo.toml; then
   echo "Warning: Cargo.toml did not change; nothing to commit."
 else
-  git commit Cargo.toml -m "$NEW_VERSION"
+  git commit Cargo.toml Cargo.lock -m "$NEW_VERSION"
 fi
 
 HASH=$(git rev-parse HEAD)
