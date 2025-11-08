@@ -1,6 +1,7 @@
 pub mod openai;
 
-use crate::{FileChange, PrItem, PrSummaryMode};
+use crate::{FileChange};
+use crate::git::{PrItem, PrSummaryMode};
 use anyhow::Result;
 
 /// Trait for talking to an LLM (real or dummy).

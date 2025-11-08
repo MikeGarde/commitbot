@@ -1,9 +1,11 @@
 use super::LlmClient;
-use crate::{FileChange, PrItem, PrSummaryMode};
+use crate::{FileChange};
+use crate::git::{PrItem, PrSummaryMode};
 use anyhow::{anyhow, Context, Result};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 /// Minimal request/response structs for OpenAI Chat Completions API.
 #[derive(Serialize)]
@@ -50,8 +52,13 @@ pub struct OpenAiClient {
 
 impl OpenAiClient {
     pub fn new(api_key: String, model: String) -> Self {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(90))
+            .build()
+            .expect("failed to build HTTP client");
+
         OpenAiClient {
-            client: Client::new(),
+            client,
             api_key,
             model,
         }
@@ -112,7 +119,9 @@ impl LlmClient for OpenAiClient {
             "You are a helpful assistant that explains code changes file-by-file \
              to later help generate a Git commit message.\n\
              Focus on intent, not line-by-line diffs.\n\
-             Keep the summary to 2-4 bullet points.",
+             Keep the summary to an appropriate number of bullet points that is consistent with the size of the commit.\n\
+             You are unaware of any other files being changed; only consider this one, you will later be informed of the other files,\n\
+             at that point you can determine if a change is preparatory or is supporting another change.",
         );
 
         if let Some(ts) = ticket_summary {
