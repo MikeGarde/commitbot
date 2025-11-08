@@ -18,15 +18,19 @@ pub struct Cli {
     pub ask: bool,
 
     /// If set, write the generated message into .git/COMMIT_EDITMSG (no commit is created)
-    #[arg(long, global = true)]
+    #[arg(short = 'w', long, global = true)]
     pub apply: bool,
+
+    /// Stage all changes before generating the commit message
+    #[arg(short, long, global = true)]
+    pub stage: bool,
 
     /// Debug mode: log prompts, responses, token usage
     #[arg(long, global = true)]
     pub debug: bool,
 
     /// Model name to use (e.g. gpt-4o-mini). If 'none', acts like --no-model.
-    #[arg(long, global = true)]
+    #[arg(short, long, global = true)]
     pub model: Option<String>,
 
     /// Disable model calls; return dummy responses instead
@@ -34,7 +38,7 @@ pub struct Cli {
     pub no_model: bool,
 
     /// API key (otherwise uses OPENAI_API_KEY env var)
-    #[arg(long, env = "OPENAI_API_KEY", global = true)]
+    #[arg(short = 'k', long, env = "OPENAI_API_KEY", global = true)]
     pub api_key: Option<String>,
 
     /// Optional: a brief human description of the ticket (for commit/PR summaries)

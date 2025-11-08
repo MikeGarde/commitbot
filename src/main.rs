@@ -9,7 +9,7 @@ use clap::Parser;
 use config::Config;
 use crate::cli_args::{Cli, Command};
 use crate::git::{current_branch, staged_diff, staged_files, staged_diff_for_file,
-                 write_commit_editmsg, collect_pr_items, PrSummaryMode};
+                 write_commit_editmsg, collect_pr_items, PrSummaryMode, stage_all};
 use crate::llm::LlmClient;
 
 use std::collections::HashSet;
@@ -346,6 +346,11 @@ fn main() -> Result<()> {
     // CLI + config
     let cli = Cli::parse();
     let cfg = Config::from_sources(&cli);
+
+    // Pre-Work Items
+    if cli.stage {
+        stage_all()?;
+    }
 
     // LLM client setup
     let boxed_client = setup::build_llm_client(&cli, &cfg);
