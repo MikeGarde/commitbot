@@ -1,84 +1,93 @@
-# Commit Bot
+# Commitbot
 
-**commitbot** is a Rust-based CLI tool that helps generate clear, structured Git commit messages using an LLM (such as OpenAI’s GPT models).  
+A Rust-powered CLI that writes meaningful, structured Git commit messages using LLMs.</b>
 
-It can analyze your staged changes, summarize each file interactively, and produce a well-organized commit message describing the intent behind the changes.
+
+[![Version](https://img.shields.io/github/v/release/MikeGarde/commitbot?color=brightgreen&label=release)](https://github.com/MikeGarde/commitbot/releases)
+[![Version](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](https://github.com/MikeGarde/commitbot/blob/main/LICENSE)
+
+---
+
+**Commitbot** analyzes your staged Git changes and helps you craft clear, consistent commit messages that describe *why* changes were made — not just *what* changed.
+
+It can summarize diffs, ask you how each file relates to the purpose of the commit, and produce structured, readable messages your teammates (and future self) will thank you for.
+
+---
 
 ## Features
 
-- Interactive "ask" mode to classify each file as main, supporting, or consequential.
-- Simple one-shot mode for fast commits.
-- Configurable model selection (e.g. `gpt-4o-mini`).
+- 🧩 **Interactive “ask” mode** – Classify each file as main, supporting, or consequential.
+- ⚡ **Quick mode** – Instantly summarize staged diffs into a commit message.
+- 🧠 **LLM-powered** – Uses OpenAI’s GPT models to generate concise and structured messages.
+- 🔧 **Configurable** – Choose models, tweak behavior, and set defaults in a config file.
+- 🧾 **Pull request summaries** – Generate clean, readable PR descriptions from your commit history.
 
-### ⚠️ Privacy Notice
-At this time, `commitbot` does not support using a local LLM model.
-Your staged diffs are sent to OpenAI for analysis. 
-
-Future versions will introduce support for specifying a custom API endpoint and integrating with self-hosted or 
-alternative LLM providers to keep all processing local or at least internal.
-
-## Prove It!
-
-All [commit](https://github.com/MikeGarde/commitbot/commits/) & 
-[PR](https://github.com/MikeGarde/commitbot/pulls?q=is%3Apr+is%3Aclosed) 
-messages in this repo will be generated using `commitbot`. Although we should all eat our own dog food, we still 
-recommend the smell test before committing here or anywhere else!
+---
 
 ## Installation
 
-### Prerequisites
+You’ll need an OpenAI API key set as an environment variable:
 
-`commitbot` needs your OpenAI API Key as an environment variable.
-
-```
+```bash
 export OPENAI_API_KEY="sk-..."
 ```
 
-### Easy - Coming Soon
+## Homebrew
 
-Placeholder for downloading pre-built binaries.
-
-### From source (local development)
-
+```bash
+brew tap mikegarde/tap
+brew install commitbot
 ```
-git clone https://github.com/mikegarde/commitbot.git
+
+## Download a Prebuilt Binary
+
+1. Visit the [latest release](https://github.com/MikeGarde/commitbot/releases/latest).
+2. Download the binary for your platform.
+3. Make it executable and move it into your PATH:
+
+```bash
+chmod +x commitbot
+sudo mv commitbot /usr/local/bin/
+commitbot --version
+```
+## Rust/Cargo
+### Build from Source
+
+```bash
+git clone https://github.com/MikeGarde/commitbot.git
 cd commitbot
 cargo install --path . --force
 ```
 
-This installs the binary into `~/.cargo/bin/commitbot`.
+### Install Directly from Git
 
-Make sure `~/.cargo/bin` is in your PATH:
-
-```
-export PATH="$HOME/.cargo/bin:$PATH"
+```bash
+cargo install --git https://github.com/MikeGarde/commitbot --force
 ```
 
-### From Git (no manual clone)
-
-```
-cargo install --git https://github.com/mikegarde/commitbot --force
-```
+---
 
 ## Usage
 
-### Simple mode
+### Simple Mode
 
 Analyze all staged changes and generate a commit message in one step:
 
-```
+```bash
 commitbot
 ```
 
-### Interactive "ask" mode
+---
 
-Walks through each staged file and asks how it relates to the main purpose of the commit:
+### Interactive Mode
 
-```
+Walk through each staged file and describe how it relates to the main purpose of the commit:
+
+```bash
 commitbot --ask
 ```
 
-For each file you can choose:
+For each file, select:
 
 ```
 1) Main purpose
@@ -87,27 +96,68 @@ For each file you can choose:
 4) Ignore
 ```
 
-After all files are classified, **commitbot** summarizes and generates a full commit message.
+After all files are classified, Commitbot summarizes and generates the full commit message.
+
+---
 
 ### Pull Request Summaries
 
-`commitbot` can also generate clear, high-level **Pull Request descriptions** by summarizing the commit history between two branches.  
-Instead of sending an enormous diff to the model, it analyzes the **commit or PR messages** to produce a concise overview of the feature branch’s purpose and major changes.
+Generate high-level PR descriptions by summarizing commit messages instead of diffs:
 
-- It collects all commits between a **base** branch (such as `develop` or `main`) and the **feature** branch.
-- If multiple PR numbers are detected in commit messages (e.g., `#123`), `commitbot` groups them and references each PR in the summary.
-- Otherwise, it summarizes the commits directly.
-- The tool can also be forced into either mode with flags.
-
-```
+```bash
 commitbot pr develop
 commitbot pr develop feat/ISSUE-201-registration
 ```
 
-## License
+Commitbot will:
 
-GPL-3.0
+- Collect all commits between the base (`develop` or `main`) and the feature branch.
+- Group commits referencing PR numbers (e.g. `#123`).
+- Summarize them into a clear, cohesive description.
 
 ---
 
-*This project is in early development. Additional documentation and features will be added as the tool evolves.*
+## Configuration
+
+Commitbot looks for a configuration file at:
+
+```bash
+~/.config/commitbot/config.toml
+```
+
+Example:
+
+```toml
+model = "gpt-4o-mini"
+```
+
+You can override these settings with CLI flags or environment variables.
+
+---
+
+## Roadmap
+
+- [ ] Support for local/offline LLMs (Ollama, LM Studio).
+- [ ] Model auto-detection and fallback.
+- [ ] Configurable commit message templates.
+- [ ] Integration with GitHub Actions or CI pipelines.
+
+---
+
+## ⚠️ Privacy Notice
+
+> At this time, `commitbot` sends staged diffs to OpenAI’s API for analysis.
+> 
+> Future versions will support **self-hosted** and **local** model endpoints (e.g. Ollama, LM Studio, or API-compatible providers) so your code can stay fully private.
+
+---
+
+## License
+
+**GPL-3.0-or-later**
+
+See [LICENSE](./LICENSE) for details.
+
+---
+
+_Commitbot is under active development — features and output quality will evolve with each release._
