@@ -29,6 +29,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub debug: bool,
 
+    /// Max concurrent requests to the LLM API
+    #[arg(long, global = true)]
+    pub max: Option<usize>,
+
     /// Model name to use (e.g. gpt-4o-mini). If 'none', acts like --no-model.
     #[arg(short, long, global = true)]
     pub model: Option<String>,
@@ -38,7 +42,7 @@ pub struct Cli {
     pub no_model: bool,
 
     /// API key (otherwise uses OPENAI_API_KEY env var)
-    #[arg(short = 'k', long, env = "OPENAI_API_KEY", global = true)]
+    #[arg(short = 'k', long, global = true)]
     pub api_key: Option<String>,
 
     /// Optional: a brief human description of the ticket (for commit/PR summaries)

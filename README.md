@@ -119,19 +119,17 @@ Commitbot will:
 
 ## Configuration
 
-Commitbot looks for a configuration file at:
-
-```bash
-~/.config/commitbot/config.toml
-```
+Commitbot looks for a configuration file at: [~/.config/commitbot.toml](./commitbot.toml). These settings are available 
+to CLI flags, environment variables, or even per-project config.
 
 Example:
 
 ```toml
 model = "gpt-4o-mini"
-```
 
-You can override these settings with CLI flags or environment variables.
+["mikegarde/commitbot"]
+model = "gpt-5-nano"
+```
 
 ---
 
@@ -141,14 +139,6 @@ You can override these settings with CLI flags or environment variables.
 - [ ] Model auto-detection and fallback.
 - [ ] Configurable commit message templates.
 - [ ] Integration with GitHub Actions or CI pipelines.
-
----
-
-## ⚠️ Privacy Notice
-
-> At this time, `commitbot` sends staged diffs to OpenAI’s API for analysis.
-> 
-> Future versions will support **self-hosted** and **local** model endpoints (e.g. Ollama, LM Studio, or API-compatible providers) so your code can stay fully private.
 
 ---
 

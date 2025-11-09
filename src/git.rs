@@ -191,3 +191,45 @@ pub fn stage_all() -> Result<()> {
     git_output(&["add", "-A"])?;
     Ok(())
 }
+
+/// Try to derive a repo identifier like "owner/repo" from `git remote.origin.url`.
+pub fn detect_repo_id() -> Option<String> {
+    use std::process::Command;
+
+    let output = Command::new("git")
+        .args(["config", "--get", "remote.origin.url"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let url = String::from_utf8(output.stdout).ok()?;
+    let trimmed = url.trim().trim_end_matches(".git");
+
+    // For SSH: git@github.com:owner/repo
+    // For HTTPS: https://github.com/owner/repo
+    let path = if let Some(idx) = trimmed.find("://") {
+        // Strip scheme and host, keep "owner/repo"
+        let rest = &trimmed[idx + 3..];
+        match rest.find('/') {
+            Some(slash) => &rest[slash + 1..],
+            None => rest,
+        }
+    } else if let Some(idx) = trimmed.find(':') {
+        // SSH-style: after ':' is "owner/repo"
+        &trimmed[idx + 1..]
+    } else {
+        trimmed
+    };
+
+    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    if segments.len() >= 2 {
+        let owner = segments[segments.len() - 2];
+        let repo = segments[segments.len() - 1];
+        Some(format!("{}/{}", owner, repo))
+    } else {
+        None
+    }
+}
