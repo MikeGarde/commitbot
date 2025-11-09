@@ -11,10 +11,14 @@ use indicatif::ProgressBar;
 
 use std::collections::HashSet;
 use std::io::{self, Write};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 use crate::cli_args::{Cli, Command};
-use crate::git::{current_branch, staged_diff, staged_files, staged_diff_for_file,
-                 write_commit_editmsg, collect_pr_items, PrSummaryMode, stage_all};
+use crate::git::{
+    collect_pr_items, current_branch, staged_diff, staged_diff_for_file, staged_files, stage_all,
+    write_commit_editmsg, PrSummaryMode,
+};
 use crate::llm::LlmClient;
 
 use crossterm::{
@@ -73,11 +77,7 @@ fn tprintln<W: Write>(out: &mut W, s: &str) -> io::Result<()> {
 }
 
 /// Arrow-key UI for choosing a FileCategory (no diff preview).
-fn categorize_file_interactive(
-    idx: usize,
-    total: usize,
-    path: &str,
-) -> Result<FileCategory> {
+fn categorize_file_interactive(idx: usize, total: usize, path: &str) -> Result<FileCategory> {
     use FileCategory::*;
 
     let mut stdout = io::stdout();
@@ -169,8 +169,105 @@ fn categorize_file_interactive(
     res
 }
 
-/// Interactive mode: classify files, then do all LLM calls afterward.
-fn run_interactive(cli: &Cli, llm: &dyn LlmClient) -> Result<()> {
+/// Run per-file summaries concurrently, honoring `max_concurrent_requests`.
+fn summarize_files_concurrently(
+    branch: &str,
+    file_changes: &mut [FileChange],
+    indices: &[usize],
+    ticket_summary: Option<&str>,
+    llm: &dyn LlmClient,
+    max_concurrent_requests: usize,
+    debug: bool,
+    pb: &ProgressBar,
+) -> Result<()> {
+    if indices.is_empty() {
+        return Ok(());
+    }
+
+    let max_concurrent = max_concurrent_requests.max(1);
+
+    // Store (file_index, result) for all summarizations.
+    let results: Arc<Mutex<Vec<(usize, Result<String>)>>> =
+        Arc::new(Mutex::new(Vec::new()));
+
+    // Process in chunks of `max_concurrent` so we never have more than that many
+    // in-flight LLM calls at once.
+    for chunk in indices.chunks(max_concurrent) {
+        thread::scope(|scope| {
+            for &file_idx in chunk {
+                let llm_ref = llm;
+                let branch = branch.to_string();
+                let ticket_summary = ticket_summary.map(str::to_owned);
+                let results = Arc::clone(&results);
+                let pb = pb.clone();
+
+                // Clone just the data we need from this file so we don't share &mut across threads.
+                let path = file_changes[file_idx].path.clone();
+                let diff = file_changes[file_idx].diff.clone();
+                let category = file_changes[file_idx].category;
+
+                scope.spawn(move || {
+                    if debug {
+                        eprintln!("[DEBUG] Summarizing file: {}", path);
+                    }
+
+                    let res = (|| -> Result<String> {
+                        let fc = FileChange {
+                            path,
+                            category,
+                            diff,
+                            summary: None,
+                        };
+
+                        let summary = llm_ref.summarize_file(
+                            &branch,
+                            &fc,
+                            ticket_summary.as_deref(),
+                            debug,
+                        )?;
+                        Ok(summary)
+                    })();
+
+                    // Always advance the progress bar for this file, even if it errors.
+                    pb.inc(1);
+
+                    let mut lock = results.lock().expect("results mutex poisoned");
+                    lock.push((file_idx, res));
+                });
+            }
+        });
+    }
+
+    // Unwrap Arc and Mutex and apply results back onto file_changes.
+    let results = Arc::try_unwrap(results)
+        .expect("results Arc still has multiple owners")
+        .into_inner()
+        .expect("results mutex poisoned");
+
+    let mut first_err: Option<anyhow::Error> = None;
+
+    for (idx, res) in results {
+        match res {
+            Ok(summary) => {
+                file_changes[idx].summary = Some(summary);
+            }
+            Err(e) => {
+                if first_err.is_none() {
+                    first_err = Some(e);
+                }
+            }
+        }
+    }
+
+    if let Some(err) = first_err {
+        return Err(err);
+    }
+
+    Ok(())
+}
+
+/// Interactive mode: classify files, then do all LLM calls afterward (batched with concurrency).
+fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     let branch = current_branch()?;
     let files = staged_files()?;
     if files.is_empty() {
@@ -188,7 +285,7 @@ fn run_interactive(cli: &Cli, llm: &dyn LlmClient) -> Result<()> {
 
     let mut file_changes: Vec<FileChange> = Vec::new();
 
-    // Phase 1: fast, purely interactive classification
+    // Phase 1: Cointeractive classification
     for (idx, path) in files.iter().enumerate() {
         let diff = staged_diff_for_file(path)?;
 
@@ -202,37 +299,45 @@ fn run_interactive(cli: &Cli, llm: &dyn LlmClient) -> Result<()> {
         });
     }
 
-    // Phase 2: LLM calls (can be slow, but user is done answering questions)
+    // Phase 2: LLM calls
     println!();
-    println!("Asking the model...");
+    println!("Asking {}...", cfg.model);
 
     let total = file_changes.len();
     let pb = ProgressBar::new((total + 1) as u64);
 
-    for (i, fc) in file_changes.iter_mut().enumerate() {
+    // Pre-increment for ignored files and collect indices that actually need summarization.
+    let mut indices_to_summarize = Vec::new();
+    let mut ignored_count = 0usize;
+
+    for (idx, fc) in file_changes.iter().enumerate() {
         if matches!(fc.category, FileCategory::Ignored) {
             pb.inc(1);
-            continue;
+            ignored_count += 1;
+        } else {
+            indices_to_summarize.push(idx);
         }
-
-        if cli.debug {
-            eprintln!(
-                "[DEBUG] Summarizing file {}/{}: {}",
-                i + 1,
-                total,
-                fc.path
-            );
-        }
-
-        let summary = llm.summarize_file(
-            &branch,
-            fc,
-            ticket_summary.as_deref(),
-            cli.debug,
-        )?;
-        fc.summary = Some(summary);
-        pb.inc(1);
     }
+
+    if cli.debug {
+        eprintln!(
+            "[DEBUG] Summarizing {} files ({} ignored). max_concurrent_requests = {}",
+            indices_to_summarize.len(),
+            ignored_count,
+            cfg.max_concurrent_requests,
+        );
+    }
+
+    summarize_files_concurrently(
+        &branch,
+        &mut file_changes,
+        &indices_to_summarize,
+        ticket_summary.as_deref(),
+        llm,
+        cfg.max_concurrent_requests,
+        cli.debug,
+        &pb,
+    )?;
 
     // Final commit message
     let commit_message = llm.generate_commit_message(
@@ -379,7 +484,7 @@ fn main() -> Result<()> {
         ),
         None => {
             if cli.ask {
-                run_interactive(&cli, boxed_client.as_ref())
+                run_interactive(&cli, &cfg, boxed_client.as_ref())
             } else {
                 run_simple(&cli, boxed_client.as_ref())
             }

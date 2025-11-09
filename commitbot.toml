@@ -1,0 +1,30 @@
+# ~/.config/commitbot.toml
+
+#######################################
+# Global defaults (used for all repos)
+#######################################
+[default]
+# Default model if nothing else is specified
+model = "gpt-5-nano"
+
+# Optional: OpenAI-style API key (falls back to env OPENAI_API_KEY)
+openai_api_key = "your api key here"
+
+# 1 = fully serial, >1 = parallel API calls
+max_concurrent_requests = 4
+
+#######################################
+# Per-repo overrides
+#######################################
+["mikegarde/commitbot"]
+model = "gpt-4o-mini"
+openai_api_key = "alternative for spend identification"
+max_concurrent_requests = 8
+
+
+["company/enterprise"]
+# Enterprise / self-hosted style config
+base_url = "https://enterprise.api.endpoint"
+model = "enterprise-model-v1"
+openai_api_key = "enterprise api key here"
+max_concurrent_requests = 2

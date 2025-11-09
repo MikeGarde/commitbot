@@ -5,7 +5,7 @@ use crate::git::{PrItem, PrSummaryMode};
 use anyhow::Result;
 
 /// Trait for talking to an LLM (real or dummy).
-pub trait LlmClient {
+pub trait LlmClient: Send + Sync {
     /// Generate a per-file summary based on diff + metadata.
     fn summarize_file(
         &self,
