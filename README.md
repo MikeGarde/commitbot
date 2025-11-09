@@ -122,7 +122,7 @@ Commitbot will:
 Commitbot looks for a configuration file at:
 
 ```bash
-~/.config/commitbot/config.toml
+~/.config/commitbot.toml
 ```
 
 Example:

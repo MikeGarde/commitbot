@@ -7,13 +7,15 @@ mod setup;
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use config::Config;
+use indicatif::ProgressBar;
+
+use std::collections::HashSet;
+use std::io::{self, Write};
+
 use crate::cli_args::{Cli, Command};
 use crate::git::{current_branch, staged_diff, staged_files, staged_diff_for_file,
                  write_commit_editmsg, collect_pr_items, PrSummaryMode, stage_all};
 use crate::llm::LlmClient;
-
-use std::collections::HashSet;
-use std::io::{self, Write};
 
 use crossterm::{
     cursor,
@@ -205,9 +207,11 @@ fn run_interactive(cli: &Cli, llm: &dyn LlmClient) -> Result<()> {
     println!("Asking the model...");
 
     let total = file_changes.len();
+    let pb = ProgressBar::new((total + 1) as u64);
 
     for (i, fc) in file_changes.iter_mut().enumerate() {
         if matches!(fc.category, FileCategory::Ignored) {
+            pb.inc(1);
             continue;
         }
 
@@ -227,6 +231,7 @@ fn run_interactive(cli: &Cli, llm: &dyn LlmClient) -> Result<()> {
             cli.debug,
         )?;
         fc.summary = Some(summary);
+        pb.inc(1);
     }
 
     // Final commit message
@@ -236,6 +241,9 @@ fn run_interactive(cli: &Cli, llm: &dyn LlmClient) -> Result<()> {
         ticket_summary.as_deref(),
         cli.debug,
     )?;
+
+    pb.inc(1);
+    pb.finish_with_message("Done.");
 
     println!();
     println!("----- Commit Message Preview -----");
