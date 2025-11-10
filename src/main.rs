@@ -169,35 +169,38 @@ fn categorize_file_interactive(idx: usize, total: usize, path: &str) -> Result<F
     res
 }
 
-/// Run per-file summaries concurrently, honoring `max_concurrent_requests`.
-fn summarize_files_concurrently(
-    branch: &str,
-    file_changes: &mut [FileChange],
-    indices: &[usize],
-    ticket_summary: Option<&str>,
-    llm: &dyn LlmClient,
+type SummarizeResultInner = Vec<(usize, Result<String>)>;
+type SummarizeResults = Arc<Mutex<SummarizeResultInner>>;
+
+struct SummarizeContext<'a> {
+    branch: &'a str,
+    ticket_summary: Option<&'a str>,
+    llm: &'a dyn LlmClient,
     max_concurrent_requests: usize,
     debug: bool,
+}
+
+/// Run per-file summaries concurrently, honoring `max_concurrent_requests`.
+fn summarize_files_concurrently(
+    file_changes: &mut [FileChange],
+    indices: &[usize],
+    ctx: &SummarizeContext<'_>,
     pb: &ProgressBar,
 ) -> Result<()> {
     if indices.is_empty() {
         return Ok(());
     }
 
-    let max_concurrent = max_concurrent_requests.max(1);
+    let max_concurrent = ctx.max_concurrent_requests.max(1);
 
     // Store (file_index, result) for all summarizations.
-    let results: Arc<Mutex<Vec<(usize, Result<String>)>>> =
-        Arc::new(Mutex::new(Vec::new()));
+    let results: SummarizeResults = Arc::new(Mutex::new(Vec::new()));
 
     // Process in chunks of `max_concurrent` so we never have more than that many
     // in-flight LLM calls at once.
     for chunk in indices.chunks(max_concurrent) {
         thread::scope(|scope| {
             for &file_idx in chunk {
-                let llm_ref = llm;
-                let branch = branch.to_string();
-                let ticket_summary = ticket_summary.map(str::to_owned);
                 let results = Arc::clone(&results);
                 let pb = pb.clone();
 
@@ -207,7 +210,7 @@ fn summarize_files_concurrently(
                 let category = file_changes[file_idx].category;
 
                 scope.spawn(move || {
-                    if debug {
+                    if ctx.debug {
                         eprintln!("[DEBUG] Summarizing file: {}", path);
                     }
 
@@ -219,11 +222,11 @@ fn summarize_files_concurrently(
                             summary: None,
                         };
 
-                        let summary = llm_ref.summarize_file(
-                            &branch,
+                        let summary = ctx.llm.summarize_file(
+                            ctx.branch,
                             &fc,
-                            ticket_summary.as_deref(),
-                            debug,
+                            ctx.ticket_summary,
+                            ctx.debug,
                         )?;
                         Ok(summary)
                     })();
@@ -328,16 +331,15 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
         );
     }
 
-    summarize_files_concurrently(
-        &branch,
-        &mut file_changes,
-        &indices_to_summarize,
-        ticket_summary.as_deref(),
+    let ctx = SummarizeContext {
+        branch: &branch,
+        ticket_summary: ticket_summary.as_deref(),
         llm,
-        cfg.max_concurrent_requests,
-        cli.debug,
-        &pb,
-    )?;
+        max_concurrent_requests: cfg.max_concurrent_requests,
+        debug: cli.debug,
+    };
+
+    summarize_files_concurrently(&mut file_changes, &indices_to_summarize, &ctx, &pb)?;
 
     // Final commit message
     let commit_message = llm.generate_commit_message(
