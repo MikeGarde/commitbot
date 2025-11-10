@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
+use log::info;
 use git::detect_repo_id;
 
 /// Final resolved configuration for commitbot.
@@ -104,6 +105,7 @@ fn config_path() -> Option<PathBuf> {
 fn load_file_config() -> Option<FileConfigRoot> {
     let path = config_path()?;
     if !path.exists() {
+        info!("No config file found");
         return None;
     }
 

@@ -188,6 +188,7 @@ pub fn collect_pr_items(base: &str, from: &str) -> Result<Vec<PrItem>> {
 
 /// Stage all new, modified, and deleted files
 pub fn stage_all() -> Result<()> {
+    log::warn!("Staging all changes");
     git_output(&["add", "-A"])?;
     Ok(())
 }

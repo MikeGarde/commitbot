@@ -1,4 +1,4 @@
-use clap::{ArgGroup, Parser, Subcommand};
+use clap::{Parser, Subcommand, ArgAction};
 
 /// CLI options
 #[derive(Parser, Debug)]
@@ -7,17 +7,12 @@ use clap::{ArgGroup, Parser, Subcommand};
     version,
     about = "LLM-assisted Git commit message generator"
 )]
-#[command(group(
-    ArgGroup::new("model_group")
-        .args(["model", "no_model"])
-        .multiple(false)
-))]
 pub struct Cli {
     /// Interactive mode: classify each file and do per-file summaries
     #[arg(long, global = true)]
     pub ask: bool,
 
-    /// If set, write the generated message into .git/COMMIT_EDITMSG (no commit is created)
+    /// If set, write the generated message
     #[arg(short = 'w', long, global = true)]
     pub apply: bool,
 
@@ -25,21 +20,13 @@ pub struct Cli {
     #[arg(short, long, global = true)]
     pub stage: bool,
 
-    /// Debug mode: log prompts, responses, token usage
-    #[arg(long, global = true)]
-    pub debug: bool,
-
     /// Max concurrent requests to the LLM API
     #[arg(long, global = true)]
     pub max: Option<usize>,
 
-    /// Model name to use (e.g. gpt-4o-mini). If 'none', acts like --no-model.
+    /// Model name to use (e.g. gpt-4o-mini)
     #[arg(short, long, global = true)]
     pub model: Option<String>,
-
-    /// Disable model calls; return dummy responses instead
-    #[arg(long, global = true)]
-    pub no_model: bool,
 
     /// API key (otherwise uses OPENAI_API_KEY env var)
     #[arg(short = 'k', long, global = true)]
@@ -48,6 +35,10 @@ pub struct Cli {
     /// Optional: a brief human description of the ticket (for commit/PR summaries)
     #[arg(long, global = true)]
     pub ticket_summary: Option<String>,
+
+    /// Increase verbosity (-v, -vv, -vvv)
+    #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
+    pub verbose: u8,
 
     /// Subcommand (e.g. 'pr')
     #[command(subcommand)]

@@ -1,24 +1,13 @@
-use crate::cli_args::Cli;
+use log::debug;
 use crate::config::Config;
-use crate::llm::{LlmClient, NoopClient};
+use crate::llm::LlmClient;
 use crate::llm::openai::OpenAiClient;
 
-/// Build the LLM client (OpenAI or Noop) based on CLI + config.
-pub fn build_llm_client(cli: &Cli, cfg: &Config) -> Box<dyn LlmClient> {
-    let use_no_model = cli.no_model || cfg.model.to_lowercase() == "none";
+/// Build the LLM client based on CLI + config.
+pub fn build_llm_client(cfg: &Config) -> Box<dyn LlmClient> {
+    let key = cfg.openai_api_key.clone();
 
-    if use_no_model {
-        if cli.debug {
-            eprintln!("[DEBUG] Using NoopClient (no model calls).");
-        }
-        Box::new(NoopClient)
-    } else {
-        let key = cfg.openai_api_key.clone();
+    debug!("Using OpenAiClient with model: {}", cfg.model);
 
-        if cli.debug {
-            eprintln!("[DEBUG] Using OpenAiClient with model: {}", cfg.model);
-        }
-
-        Box::new(OpenAiClient::new(key, cfg.model.clone()))
-    }
+    Box::new(OpenAiClient::new(key, cfg.model.clone()))
 }
