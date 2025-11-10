@@ -64,12 +64,10 @@ impl OpenAiClient {
         }
     }
 
-    fn call_chat(&self, req: &ChatRequest, debug: bool) -> Result<(String, Option<ChatUsage>)> {
+    fn call_chat(&self, req: &ChatRequest) -> Result<(String, Option<ChatUsage>)> {
         let url = "https://api.openai.com/v1/chat/completions";
 
-        if debug {
-            eprintln!("[DEBUG] Calling OpenAI model: {}", req.model);
-        }
+        log::info!("Calling OpenAI model {:?}", &req.model);
 
         let resp = self
             .client
@@ -96,9 +94,8 @@ impl OpenAiClient {
             .map(|c| c.message.content.clone())
             .ok_or_else(|| anyhow!("no choices returned from OpenAI"))?;
 
-        if debug && let Some(usage) = &chat_resp.usage {
-            eprintln!(
-                "[DEBUG] Token usage: prompt={}, completion={}, total={}",
+        if let Some(usage) = &chat_resp.usage {
+            log::warn!("Token usage: prompt={}, completion={}, total={}",
                 usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
             );
         }
@@ -113,7 +110,6 @@ impl LlmClient for OpenAiClient {
         branch: &str,
         file: &FileChange,
         ticket_summary: Option<&str>,
-        debug: bool,
     ) -> Result<String> {
         let mut system_instructions = String::from(
             "You are a helpful assistant that explains code changes file-by-file \
@@ -141,14 +137,12 @@ impl LlmClient for OpenAiClient {
             diff = file.diff
         );
 
-        if debug {
-            eprintln!(
-                "[DEBUG] Per-file summarize prompt for {} ({:?}):\n{}",
-                file.path,
-                file.category,
-                truncate(&user_prompt, 2000)
-            );
-        }
+        log::debug!(
+            "Per-file summarize prompt for {} ({:?}):\n{}",
+            file.path,
+            file.category,
+            truncate(&user_prompt, 2000)
+        );
 
         let req = ChatRequest {
             model: self.model.clone(),
@@ -164,7 +158,7 @@ impl LlmClient for OpenAiClient {
             ],
         };
 
-        let (content, _usage) = self.call_chat(&req, debug)?;
+        let (content, _usage) = self.call_chat(&req)?;
         Ok(content)
     }
 
@@ -173,7 +167,6 @@ impl LlmClient for OpenAiClient {
         branch: &str,
         files: &[FileChange],
         ticket_summary: Option<&str>,
-        debug: bool,
     ) -> Result<String> {
         let mut per_file_block = String::new();
         for file in files.iter().filter(|f| !matches!(f.category, crate::FileCategory::Ignored)) {
@@ -215,12 +208,10 @@ impl LlmClient for OpenAiClient {
             per_file = per_file_block
         );
 
-        if debug {
-            eprintln!(
-                "[DEBUG] Final commit-message prompt:\n{}",
-                truncate(&user_prompt, 3000)
-            );
-        }
+        log::debug!(
+            "Final commit-message prompt:\n{}",
+            truncate(&user_prompt, 3000)
+        );
 
         let req = ChatRequest {
             model: self.model.clone(),
@@ -236,7 +227,7 @@ impl LlmClient for OpenAiClient {
             ],
         };
 
-        let (content, _usage) = self.call_chat(&req, debug)?;
+        let (content, _usage) = self.call_chat(&req)?;
         Ok(content)
     }
 
@@ -244,7 +235,6 @@ impl LlmClient for OpenAiClient {
         &self,
         branch: &str,
         diff: &str,
-        debug: bool,
     ) -> Result<String> {
         let system_prompt = String::from(
             "You are a Git commit message assistant.\n\
@@ -268,12 +258,10 @@ impl LlmClient for OpenAiClient {
             diff = diff
         );
 
-        if debug {
-            eprintln!(
-                "[DEBUG] Simple commit-message prompt:\n{}",
-                truncate(&user_prompt, 3000)
-            );
-        }
+        log::trace!(
+            "Simple commit-message prompt:\n{}",
+            truncate(&user_prompt, 3000)
+        );
 
         let req = ChatRequest {
             model: self.model.clone(),
@@ -289,7 +277,7 @@ impl LlmClient for OpenAiClient {
             ],
         };
 
-        let (content, _usage) = self.call_chat(&req, debug)?;
+        let (content, _usage) = self.call_chat(&req)?;
         Ok(content)
     }
 
@@ -300,7 +288,6 @@ impl LlmClient for OpenAiClient {
         mode: PrSummaryMode,
         items: &[PrItem],
         ticket_summary: Option<&str>,
-        debug: bool,
     ) -> Result<String> {
         let mut system_instructions = String::from(
             "You are a GitHub Pull Request description assistant.\n\
@@ -415,12 +402,10 @@ impl LlmClient for OpenAiClient {
             }
         }
 
-        if debug {
-            eprintln!(
-                "[DEBUG] PR description prompt:\n{}",
-                truncate(&user_prompt, 3500)
-            );
-        }
+        log::trace!(
+            "PR description prompt:\n{}",
+            truncate(&user_prompt, 3500)
+        );
 
         let req = ChatRequest {
             model: self.model.clone(),
@@ -436,7 +421,7 @@ impl LlmClient for OpenAiClient {
             ],
         };
 
-        let (content, _usage) = self.call_chat(&req, debug)?;
+        let (content, _usage) = self.call_chat(&req)?;
         Ok(content)
     }
 }

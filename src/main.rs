@@ -1,7 +1,8 @@
-mod config;
-mod llm;
-mod git;
 mod cli_args;
+mod config;
+mod git;
+mod llm;
+mod logging;
 mod setup;
 
 use anyhow::{anyhow, Result};
@@ -177,7 +178,6 @@ struct SummarizeContext<'a> {
     ticket_summary: Option<&'a str>,
     llm: &'a dyn LlmClient,
     max_concurrent_requests: usize,
-    debug: bool,
 }
 
 /// Run per-file summaries concurrently, honoring `max_concurrent_requests`.
@@ -210,9 +210,7 @@ fn summarize_files_concurrently(
                 let category = file_changes[file_idx].category;
 
                 scope.spawn(move || {
-                    if ctx.debug {
-                        eprintln!("[DEBUG] Summarizing file: {}", path);
-                    }
+                    log::debug!("Summarizing file: {}", path);
 
                     let res = (|| -> Result<String> {
                         let fc = FileChange {
@@ -226,7 +224,6 @@ fn summarize_files_concurrently(
                             ctx.branch,
                             &fc,
                             ctx.ticket_summary,
-                            ctx.debug,
                         )?;
                         Ok(summary)
                     })();
@@ -322,21 +319,18 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
         }
     }
 
-    if cli.debug {
-        eprintln!(
-            "[DEBUG] Summarizing {} files ({} ignored). max_concurrent_requests = {}",
-            indices_to_summarize.len(),
-            ignored_count,
-            cfg.max_concurrent_requests,
-        );
-    }
+    log::info!(
+        "Summarizing {} files ({} ignored). max_concurrent_requests = {}",
+        indices_to_summarize.len(),
+        ignored_count,
+        cfg.max_concurrent_requests,
+    );
 
     let ctx = SummarizeContext {
         branch: &branch,
         ticket_summary: ticket_summary.as_deref(),
         llm,
         max_concurrent_requests: cfg.max_concurrent_requests,
-        debug: cli.debug,
     };
 
     summarize_files_concurrently(&mut file_changes, &indices_to_summarize, &ctx, &pb)?;
@@ -346,7 +340,6 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
         &branch,
         &file_changes,
         ticket_summary.as_deref(),
-        cli.debug,
     )?;
 
     pb.inc(1);
@@ -375,7 +368,7 @@ fn run_simple(cli: &Cli, llm: &dyn LlmClient) -> Result<()> {
         return Ok(());
     }
 
-    let commit_message = llm.generate_commit_message_simple(&branch, &diff, cli.debug)?;
+    let commit_message = llm.generate_commit_message_simple(&branch, &diff)?;
 
     println!();
     println!("----- Commit Message Preview -----");
@@ -430,15 +423,13 @@ fn run_pr(
         }
     };
 
-    if cli.debug {
-        eprintln!(
-            "[DEBUG] PR mode: base={base}, from={from}, mode={mode}",
-            base = base,
-            from = from_branch,
-            mode = mode.as_str()
-        );
-        eprintln!("[DEBUG] Found {} commits in range.", items.len());
-    }
+    log::info!(
+        "PR mode: base={base}, from={from}, mode={mode}",
+        base = base,
+        from = from_branch,
+        mode = mode.as_str()
+    );
+    log::info!("Found {} commits in range.", items.len());
 
     let pr_message = llm.generate_pr_message(
         base,
@@ -446,7 +437,6 @@ fn run_pr(
         mode,
         &items,
         cli.ticket_summary.as_deref(),
-        cli.debug,
     )?;
 
     println!();
@@ -460,7 +450,14 @@ fn run_pr(
 fn main() -> Result<()> {
     // CLI + config
     let cli = Cli::parse();
+
+    // Initialize logging
+    logging::init_logger(cli.verbose);
+
     let cfg = Config::from_sources(&cli);
+
+    log::info!("Starting commitbot");
+    log::debug!("CLI args: {:?}", cli);
 
     // Pre-Work Items
     if cli.stage {
@@ -468,7 +465,7 @@ fn main() -> Result<()> {
     }
 
     // LLM client setup
-    let boxed_client = setup::build_llm_client(&cli, &cfg);
+    let boxed_client = setup::build_llm_client(&cfg);
 
     match &cli.command {
         Some(Command::Pr {
