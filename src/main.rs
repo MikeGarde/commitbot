@@ -9,7 +9,6 @@ use anyhow::{anyhow, Result};
 use clap::Parser;
 use config::Config;
 use indicatif::ProgressBar;
-use log::{info, debug};
 
 use std::collections::HashSet;
 use std::io::{self, Write};
@@ -211,7 +210,7 @@ fn summarize_files_concurrently(
                 let category = file_changes[file_idx].category;
 
                 scope.spawn(move || {
-                    debug!("Summarizing file: {}", path);
+                    log::debug!("Summarizing file: {}", path);
 
                     let res = (|| -> Result<String> {
                         let fc = FileChange {
@@ -320,7 +319,7 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
         }
     }
 
-    info!(
+    log::info!(
         "Summarizing {} files ({} ignored). max_concurrent_requests = {}",
         indices_to_summarize.len(),
         ignored_count,
@@ -424,13 +423,13 @@ fn run_pr(
         }
     };
 
-    info!(
+    log::info!(
         "PR mode: base={base}, from={from}, mode={mode}",
         base = base,
         from = from_branch,
         mode = mode.as_str()
     );
-    info!("Found {} commits in range.", items.len());
+    log::info!("Found {} commits in range.", items.len());
 
     let pr_message = llm.generate_pr_message(
         base,
@@ -457,8 +456,8 @@ fn main() -> Result<()> {
 
     let cfg = Config::from_sources(&cli);
 
-    info!("Starting commitbot");
-    debug!("CLI args: {:?}", cli);
+    log::info!("Starting commitbot");
+    log::debug!("CLI args: {:?}", cli);
 
     // Pre-Work Items
     if cli.stage {

@@ -6,7 +6,6 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::time::Duration;
-use log::{debug, info, trace, warn};
 
 /// Minimal request/response structs for OpenAI Chat Completions API.
 #[derive(Serialize)]
@@ -68,7 +67,7 @@ impl OpenAiClient {
     fn call_chat(&self, req: &ChatRequest) -> Result<(String, Option<ChatUsage>)> {
         let url = "https://api.openai.com/v1/chat/completions";
 
-        info!("Calling OpenAI model {:?}", &req.model);
+        log::info!("Calling OpenAI model {:?}", &req.model);
 
         let resp = self
             .client
@@ -96,7 +95,7 @@ impl OpenAiClient {
             .ok_or_else(|| anyhow!("no choices returned from OpenAI"))?;
 
         if let Some(usage) = &chat_resp.usage {
-            warn!("Token usage: prompt={}, completion={}, total={}",
+            log::warn!("Token usage: prompt={}, completion={}, total={}",
                 usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
             );
         }
@@ -138,7 +137,7 @@ impl LlmClient for OpenAiClient {
             diff = file.diff
         );
 
-        debug!(
+        log::debug!(
             "Per-file summarize prompt for {} ({:?}):\n{}",
             file.path,
             file.category,
@@ -209,7 +208,7 @@ impl LlmClient for OpenAiClient {
             per_file = per_file_block
         );
 
-        debug!(
+        log::debug!(
             "Final commit-message prompt:\n{}",
             truncate(&user_prompt, 3000)
         );
@@ -259,7 +258,7 @@ impl LlmClient for OpenAiClient {
             diff = diff
         );
 
-        trace!(
+        log::trace!(
             "Simple commit-message prompt:\n{}",
             truncate(&user_prompt, 3000)
         );
@@ -403,7 +402,7 @@ impl LlmClient for OpenAiClient {
             }
         }
 
-        trace!(
+        log::trace!(
             "PR description prompt:\n{}",
             truncate(&user_prompt, 3500)
         );

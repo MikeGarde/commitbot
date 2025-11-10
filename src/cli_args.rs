@@ -12,7 +12,7 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub ask: bool,
 
-    /// If set, write the generated message
+    /// If set, write the generated message into .git/COMMIT_EDITMSG (no commit is created)
     #[arg(short = 'w', long, global = true)]
     pub apply: bool,
 
