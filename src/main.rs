@@ -72,6 +72,13 @@ fn prompt_input(prompt: &str) -> Result<String> {
     Ok(buf.trim().to_string())
 }
 
+fn resolved_ticket_summary(cli: &Cli) -> Option<String> {
+    match &cli.command {
+        Some(Command::Summary(words)) if !words.is_empty() => Some(words.join(" ")),
+        _ => None,
+    }
+}
+
 /// Helper: write a line in raw mode so we also reset the cursor to column 0.
 fn tprintln<W: Write>(out: &mut W, s: &str) -> io::Result<()> {
     write!(out, "{}\r\n", s)
@@ -275,7 +282,7 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
         return Ok(());
     }
 
-    let mut ticket_summary = cli.ticket_summary.clone();
+    let mut ticket_summary = resolved_ticket_summary(cli);
     if ticket_summary.is_none() {
         let ans = prompt_input("Optional: brief ticket summary (enter to skip): ")?;
         if !ans.is_empty() {
@@ -336,19 +343,36 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     summarize_files_concurrently(&mut file_changes, &indices_to_summarize, &ctx, &pb)?;
 
     // Final commit message
-    let commit_message = llm.generate_commit_message(
-        &branch,
-        &file_changes,
-        ticket_summary.as_deref(),
-    )?;
+    let commit_message = if cfg.stream {
+        pb.inc(1);
+        pb.finish_with_message("Done.");
 
-    pb.inc(1);
-    pb.finish_with_message("Done.");
+        println!();
+        println!("----- Commit Message Preview -----");
+        let msg = llm.generate_commit_message(
+            &branch,
+            &file_changes,
+            ticket_summary.as_deref(),
+        )?;
+        println!();
+        println!("----------------------------------");
+        msg
+    } else {
+        let msg = llm.generate_commit_message(
+            &branch,
+            &file_changes,
+            ticket_summary.as_deref(),
+        )?;
 
-    println!();
-    println!("----- Commit Message Preview -----");
-    println!("{commit_message}");
-    println!("----------------------------------");
+        pb.inc(1);
+        pb.finish_with_message("Done.");
+
+        println!();
+        println!("----- Commit Message Preview -----");
+        println!("{msg}");
+        println!("----------------------------------");
+        msg
+    };
 
     if cli.apply {
         write_commit_editmsg(&commit_message)?;
@@ -359,7 +383,7 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
 }
 
 /// Simple mode: one-shot commit message from entire staged diff.
-fn run_simple(cli: &Cli, llm: &dyn LlmClient) -> Result<()> {
+fn run_simple(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     let branch = current_branch()?;
     let diff = staged_diff()?;
 
@@ -368,12 +392,31 @@ fn run_simple(cli: &Cli, llm: &dyn LlmClient) -> Result<()> {
         return Ok(());
     }
 
-    let commit_message = llm.generate_commit_message_simple(&branch, &diff)?;
+    let ticket_summary = resolved_ticket_summary(cli);
+    let commit_message = if cfg.stream {
+        println!();
+        println!("----- Commit Message Preview -----");
+        let msg = llm.generate_commit_message_simple(
+            &branch,
+            &diff,
+            ticket_summary.as_deref(),
+        )?;
+        println!();
+        println!("----------------------------------");
+        msg
+    } else {
+        let msg = llm.generate_commit_message_simple(
+            &branch,
+            &diff,
+            ticket_summary.as_deref(),
+        )?;
 
-    println!();
-    println!("----- Commit Message Preview -----");
-    println!("{commit_message}");
-    println!("----------------------------------");
+        println!();
+        println!("----- Commit Message Preview -----");
+        println!("{msg}");
+        println!("----------------------------------");
+        msg
+    };
 
     if cli.apply {
         write_commit_editmsg(&commit_message)?;
@@ -386,6 +429,7 @@ fn run_simple(cli: &Cli, llm: &dyn LlmClient) -> Result<()> {
 /// PR mode: summarize commits/PRs between base..from into a PR description.
 fn run_pr(
     cli: &Cli,
+    cfg: &Config,
     llm: &dyn LlmClient,
     base: &str,
     from_opt: Option<&str>,
@@ -431,18 +475,35 @@ fn run_pr(
     );
     log::info!("Found {} commits in range.", items.len());
 
-    let pr_message = llm.generate_pr_message(
-        base,
-        &from_branch,
-        mode,
-        &items,
-        cli.ticket_summary.as_deref(),
-    )?;
+    let ticket_summary = resolved_ticket_summary(cli);
+    let _pr_message = if cfg.stream {
+        println!();
+        println!("----- PR Message Preview -----");
+        let msg = llm.generate_pr_message(
+            base,
+            &from_branch,
+            mode,
+            &items,
+            ticket_summary.as_deref(),
+        )?;
+        println!();
+        println!("------------------------------");
+        msg
+    } else {
+        let msg = llm.generate_pr_message(
+            base,
+            &from_branch,
+            mode,
+            &items,
+            ticket_summary.as_deref(),
+        )?;
 
-    println!();
-    println!("----- PR Message Preview -----");
-    println!("{pr_message}");
-    println!("------------------------------");
+        println!();
+        println!("----- PR Message Preview -----");
+        println!("{msg}");
+        println!("------------------------------");
+        msg
+    };
 
     Ok(())
 }
@@ -455,9 +516,6 @@ fn main() -> Result<()> {
     logging::init_logger(cli.verbose);
 
     let cfg = Config::from_sources(&cli);
-
-    log::info!("Starting commitbot");
-    log::debug!("CLI args: {:?}", cli);
 
     // Pre-Work Items
     if cli.stage {
@@ -475,17 +533,18 @@ fn main() -> Result<()> {
                  commit_mode,
              }) => run_pr(
             &cli,
+            &cfg,
             boxed_client.as_ref(),
             base.as_str(),
             from.as_deref(),
             *pr_mode,
             *commit_mode,
         ),
-        None => {
+        Some(Command::Summary(_)) | None => {
             if cli.ask {
                 run_interactive(&cli, &cfg, boxed_client.as_ref())
             } else {
-                run_simple(&cli, boxed_client.as_ref())
+                run_simple(&cli, &cfg, boxed_client.as_ref())
             }
         }
     }

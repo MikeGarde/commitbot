@@ -1,4 +1,8 @@
 pub mod openai;
+pub mod ollama;
+mod prompts;
+mod prompt_builder;
+mod stream;
 
 use crate::git::{PrItem, PrSummaryMode};
 use crate::FileChange;
@@ -27,6 +31,7 @@ pub trait LlmClient: Send + Sync {
         &self,
         branch: &str,
         diff: &str,
+        ticket_summary: Option<&str>,
     ) -> Result<String>;
 
     /// PR mode: generate a PR description from commit/PR messages.

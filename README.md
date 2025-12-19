@@ -1,7 +1,6 @@
 # Commitbot
 
-A Rust-powered CLI that writes meaningful, structured Git commit messages using LLMs.</b>
-
+A Rust-powered CLI that writes meaningful, structured Git commit messages using LLMs.
 
 [![Version](https://img.shields.io/github/v/release/MikeGarde/commitbot?color=brightgreen&label=release)](https://github.com/MikeGarde/commitbot/releases)
 [![Version](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](https://github.com/MikeGarde/commitbot/blob/main/LICENSE)
@@ -16,11 +15,11 @@ It can summarize diffs, ask you how each file relates to the purpose of the comm
 
 ## Features
 
-- 🧩 **Interactive “ask” mode** – Classify each file as main, supporting, or consequential.
-- ⚡ **Quick mode** – Instantly summarize staged diffs into a commit message.
-- 🧠 **LLM-powered** – Uses OpenAI’s GPT models to generate concise and structured messages.
-- 🔧 **Configurable** – Choose models, tweak behavior, and set defaults in a config file.
-- 🧾 **Pull request summaries** – Generate clean, readable PR descriptions from your commit history.
+- **Interactive “ask” mode** – Classify each file as main, supporting, or consequential.
+- **Quick mode** – Instantly summarize staged diffs into a commit message.
+- **LLM-powered** – Uses OpenAI’s GPT models to generate concise and structured messages.
+- **Configurable** – Choose models, tweak behavior, and set defaults in a config file.
+- **Pull request summaries** – Generate clean, readable PR descriptions from your commit history.
 
 ---
 
@@ -32,37 +31,11 @@ You’ll need an OpenAI API key set as an environment variable:
 export OPENAI_API_KEY="sk-..."
 ```
 
-## Homebrew
+### Homebrew
 
 ```bash
 brew tap mikegarde/tap
 brew install commitbot
-```
-
-## Download a Prebuilt Binary
-
-1. Visit the [latest release](https://github.com/MikeGarde/commitbot/releases/latest).
-2. Download the binary for your platform.
-3. Make it executable and move it into your PATH:
-
-```bash
-chmod +x commitbot
-sudo mv commitbot /usr/local/bin/
-commitbot --version
-```
-## Rust/Cargo
-### Build from Source
-
-```bash
-git clone https://github.com/MikeGarde/commitbot.git
-cd commitbot
-cargo install --path . --force
-```
-
-### Install Directly from Git
-
-```bash
-cargo install --git https://github.com/MikeGarde/commitbot --force
 ```
 
 ---
@@ -119,8 +92,9 @@ Commitbot will:
 
 ## Configuration
 
-Commitbot looks for a configuration file at: [~/.config/commitbot.toml](./commitbot.toml). These settings are available 
-to CLI flags, environment variables, or even per-project config.
+Commitbot automatically loads its configuration from [~/.config/commitbot.toml](./commitbot.toml).
+Settings can be defined globally in this file, overridden by environment variables, or specified directly through CLI flags.
+Per-project configurations are also supported for repository-specific overrides.
 
 Example:
 
@@ -135,12 +109,10 @@ model = "gpt-5-nano"
 
 ## Roadmap
 
-- [ ] Support for local/offline LLMs (Ollama, LM Studio).
+- [x] Support for local/offline LLMs (Ollama, LM Studio).
 - [ ] Model auto-detection and fallback.
 - [ ] Configurable commit message templates.
 - [ ] Integration with GitHub Actions or CI pipelines.
-
----
 
 ## License
 
