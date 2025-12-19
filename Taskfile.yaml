@@ -1,8 +1,5 @@
 version: '3'
 
-vars:
-  BINARY_NAME: commitbot
-
 tasks:
   setup:
     desc: "Setup development environment"
@@ -23,12 +20,12 @@ tasks:
   run:simple:
     desc: "Run commitbot in simple mode (no model, debug) using cargo run"
     cmds:
-      - cargo run -- --no-model --debug
+      - cargo run -- -vv
 
   run:ask:
     desc: "Run commitbot in interactive ask mode (no model, debug)"
     cmds:
-      - cargo run -- --ask --no-model --debug
+      - cargo run -- --ask
 
   run:ask:real:
     desc: "Run commitbot in interactive ask mode using real model"
@@ -42,7 +39,7 @@ tasks:
         fi
         cargo run -- --ask
 
-  install:local:
+  install:
     desc: "Install commitbot binary locally via cargo install --path ."
     cmds:
       - cargo install --path . --force
@@ -52,7 +49,7 @@ tasks:
     silent: true
     cmds:
       - cargo build --release
-      - du -h target/release/{{.BINARY_NAME}}
+      - du -h target/release/commitbot
 
   build:release:*:
     desc: "Build release binaries for all targets and package into dist/"
@@ -94,6 +91,7 @@ tasks:
       - sh devops/release.sh {{.VERSION}}
       - task: publish:dry
       - task: publish
+      - cd ../homebrew-tap && gh workflow run update-formula.yml -f formula=commitbot -f repo=mikegarde/commitbot -f version={{.VERSION}}
 
   publish:dry:
     desc: "Dry-run crates.io publish to verify packaging"

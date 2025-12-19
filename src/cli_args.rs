@@ -32,9 +32,23 @@ pub struct Cli {
     #[arg(short = 'k', long, global = true)]
     pub api_key: Option<String>,
 
-    /// Optional: a brief human description of the ticket (for commit/PR summaries)
+    /// LLM provider / API style (openai or ollama)
     #[arg(long, global = true)]
-    pub ticket_summary: Option<String>,
+    pub provider: Option<String>,
+
+    /// Base URL for the selected provider (e.g. http://localhost:11434) llama3.1:8b-instruct-q5_K_M
+    #[arg(long, global = true)]
+    pub url: Option<String>,
+
+    /// Stream responses as they are generated (use `--stream=false` to disable)
+    #[arg(
+        long,
+        global = true,
+        default_missing_value = "true",
+        num_args = 0..=1,
+        value_parser = clap::value_parser!(bool)
+    )]
+    pub stream: Option<bool>,
 
     /// Increase verbosity (-v, -vv, -vvv)
     #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
@@ -64,4 +78,8 @@ pub enum Command {
         #[arg(long = "commit")]
         commit_mode: bool,
     },
+
+    /// Freeform summary provided at the end of the command.
+    #[command(external_subcommand)]
+    Summary(Vec<String>),
 }
