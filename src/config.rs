@@ -103,7 +103,7 @@ impl Config {
         let openai_api_key = openai_api_key.map(|s| s.trim_matches('"').to_string());
         let base_url = base_url.map(|s| s.trim_matches('"').to_string());
 
-        let url = base_url.clone().unwrap_or_else(|| "".to_string());
+        let url = base_url.clone().unwrap_or_default();
 
         log::debug!("Provider: {}", provider);
         log::debug!("Model:    {}", model);
