@@ -88,6 +88,7 @@ tasks:
       VERSION: '{{index .MATCH 0}}'
     interactive: true
     cmds:
+      - task: test
       - sh devops/release.sh {{.VERSION}}
       - task: publish:dry
       - task: publish

@@ -99,7 +99,7 @@ impl OllamaClient {
 
         if stream {
             let reader = BufReader::new(resp);
-            return read_stream_to_string(reader, |line| parse_stream_line(line));
+            return read_stream_to_string(reader, parse_stream_line);
         }
 
         let resp_text = resp

@@ -161,7 +161,7 @@ impl OpenAiClient {
         }
 
         let reader = BufReader::new(resp);
-        read_stream_to_string(reader, |line| parse_stream_line(line))
+        read_stream_to_string(reader, parse_stream_line)
     }
 }
 
