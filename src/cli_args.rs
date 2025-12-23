@@ -12,10 +12,6 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub ask: bool,
 
-    /// If set, write the generated message into .git/COMMIT_EDITMSG (no commit is created)
-    #[arg(short = 'w', long, global = true)]
-    pub apply: bool,
-
     /// Stage all changes before generating the commit message
     #[arg(short, long, global = true)]
     pub stage: bool,
