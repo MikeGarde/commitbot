@@ -8,17 +8,18 @@ mod setup;
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use config::Config;
-use indicatif::ProgressBar;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 use std::collections::HashSet;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use crate::cli_args::{Cli, Command};
 use crate::git::{
     collect_pr_items, current_branch, staged_diff, staged_diff_for_file, staged_files, stage_all,
-    write_commit_editmsg, PrSummaryMode,
+    PrSummaryMode,
 };
 use crate::llm::LlmClient;
 
@@ -82,6 +83,21 @@ fn resolved_ticket_summary(cli: &Cli) -> Option<String> {
 /// Helper: write a line in raw mode so we also reset the cursor to column 0.
 fn tprintln<W: Write>(out: &mut W, s: &str) -> io::Result<()> {
     write!(out, "{}\r\n", s)
+}
+
+fn preview_snippet(text: &str) -> String {
+    let trimmed = text.trim();
+    let first_line = trimmed.lines().next().unwrap_or("");
+    const MAX: usize = 80;
+    if first_line.len() > MAX {
+        format!("{}…", &first_line[..MAX])
+    } else {
+        first_line.to_string()
+    }
+}
+
+fn dimmed(text: &str) -> String {
+    format!("\x1b[2m{text}\x1b[0m")
 }
 
 /// Arrow-key UI for choosing a FileCategory (no diff preview).
@@ -193,6 +209,7 @@ fn summarize_files_concurrently(
     indices: &[usize],
     ctx: &SummarizeContext<'_>,
     pb: &ProgressBar,
+    file_lines: Option<&[ProgressBar]>,
 ) -> Result<()> {
     if indices.is_empty() {
         return Ok(());
@@ -210,6 +227,12 @@ fn summarize_files_concurrently(
             for &file_idx in chunk {
                 let results = Arc::clone(&results);
                 let pb = pb.clone();
+                let file_line = file_lines
+                    .and_then(|lines| lines.get(file_idx)).cloned();
+
+                if let Some(line) = &file_line {
+                    line.set_message("summarizing...");
+                }
 
                 // Clone just the data we need from this file so we don't share &mut across threads.
                 let path = file_changes[file_idx].path.clone();
@@ -237,6 +260,18 @@ fn summarize_files_concurrently(
 
                     // Always advance the progress bar for this file, even if it errors.
                     pb.inc(1);
+
+                    if let Some(line) = &file_line {
+                        match &res {
+                            Ok(summary) => {
+                                let snippet = preview_snippet(summary);
+                                line.finish_with_message(dimmed(&snippet));
+                            }
+                            Err(err) => {
+                                line.finish_with_message(dimmed(&format!("error: {err}")));
+                            }
+                        }
+                    }
 
                     let mut lock = results.lock().expect("results mutex poisoned");
                     lock.push((file_idx, res));
@@ -311,7 +346,30 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     println!("Asking {}...", cfg.model);
 
     let total = file_changes.len();
-    let pb = ProgressBar::new((total + 1) as u64);
+    let mp = MultiProgress::new();
+    let mut file_lines = Vec::new();
+
+    for fc in &file_changes {
+        let line = mp.add(ProgressBar::new_spinner());
+        line.set_style(
+            ProgressStyle::with_template("{spinner:.cyan} {prefix:.bold}: {msg}")
+                .expect("progress style template"),
+        );
+        line.set_prefix(fc.path.clone());
+        if matches!(fc.category, FileCategory::Ignored) {
+            line.finish_with_message(dimmed("ignored"));
+        } else {
+            line.enable_steady_tick(Duration::from_millis(120));
+            line.set_message("waiting");
+        }
+        file_lines.push(line);
+    }
+
+    let pb = mp.add(ProgressBar::new((total + 1) as u64));
+    pb.set_style(
+        ProgressStyle::with_template("{wide_bar:.green} {pos}/{len} files")
+            .unwrap_or_else(|_| ProgressStyle::default_bar()),
+    );
 
     // Pre-increment for ignored files and collect indices that actually need summarization.
     let mut indices_to_summarize = Vec::new();
@@ -340,43 +398,34 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
         max_concurrent_requests: cfg.max_concurrent_requests,
     };
 
-    summarize_files_concurrently(&mut file_changes, &indices_to_summarize, &ctx, &pb)?;
+    summarize_files_concurrently(
+        &mut file_changes,
+        &indices_to_summarize,
+        &ctx,
+        &pb,
+        Some(&file_lines),
+    )?;
+
+    pb.inc(1);
+    pb.finish_with_message("Done");
 
     // Final commit message
-    let commit_message = if cfg.stream {
-        pb.inc(1);
-        pb.finish_with_message("Done.");
+    println!();
 
-        println!();
-        println!("----- Commit Message Preview -----");
-        let msg = llm.generate_commit_message(
+    if cfg.stream {
+        let _msg = llm.generate_commit_message(
             &branch,
             &file_changes,
             ticket_summary.as_deref(),
         )?;
         println!();
-        println!("----------------------------------");
-        msg
     } else {
         let msg = llm.generate_commit_message(
             &branch,
             &file_changes,
             ticket_summary.as_deref(),
         )?;
-
-        pb.inc(1);
-        pb.finish_with_message("Done.");
-
-        println!();
-        println!("----- Commit Message Preview -----");
         println!("{msg}");
-        println!("----------------------------------");
-        msg
-    };
-
-    if cli.apply {
-        write_commit_editmsg(&commit_message)?;
-        println!("(Message written to .git/COMMIT_EDITMSG; run `git commit` to edit/confirm.)");
     }
 
     Ok(())
@@ -393,34 +442,22 @@ fn run_simple(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     }
 
     let ticket_summary = resolved_ticket_summary(cli);
-    let commit_message = if cfg.stream {
-        println!();
-        println!("----- Commit Message Preview -----");
-        let msg = llm.generate_commit_message_simple(
+    println!();
+
+    if cfg.stream {
+        let _msg = llm.generate_commit_message_simple(
             &branch,
             &diff,
             ticket_summary.as_deref(),
         )?;
         println!();
-        println!("----------------------------------");
-        msg
     } else {
         let msg = llm.generate_commit_message_simple(
             &branch,
             &diff,
             ticket_summary.as_deref(),
         )?;
-
-        println!();
-        println!("----- Commit Message Preview -----");
         println!("{msg}");
-        println!("----------------------------------");
-        msg
-    };
-
-    if cli.apply {
-        write_commit_editmsg(&commit_message)?;
-        println!("(Message written to .git/COMMIT_EDITMSG; run `git commit` to edit/confirm.)");
     }
 
     Ok(())
@@ -478,7 +515,6 @@ fn run_pr(
     let ticket_summary = resolved_ticket_summary(cli);
     let _pr_message = if cfg.stream {
         println!();
-        println!("----- PR Message Preview -----");
         let msg = llm.generate_pr_message(
             base,
             &from_branch,
@@ -487,9 +523,9 @@ fn run_pr(
             ticket_summary.as_deref(),
         )?;
         println!();
-        println!("------------------------------");
         msg
     } else {
+        println!();
         let msg = llm.generate_pr_message(
             base,
             &from_branch,
@@ -498,10 +534,7 @@ fn run_pr(
             ticket_summary.as_deref(),
         )?;
 
-        println!();
-        println!("----- PR Message Preview -----");
         println!("{msg}");
-        println!("------------------------------");
         msg
     };
 

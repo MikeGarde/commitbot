@@ -1,7 +1,5 @@
 use anyhow::{anyhow, Context, Result};
-use std::path::PathBuf;
 use std::process::Command as GitCommand;
-use std::fs;
 
 /// How we want to summarize a PR.
 #[derive(Debug, Clone, Copy)]
@@ -44,34 +42,6 @@ pub fn git_output(args: &[&str]) -> Result<String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
-
-/// Get the path to the Git directory (e.g. .git)
-pub fn git_dir() -> Result<PathBuf> {
-    let output = GitCommand::new("git")
-        .args(["rev-parse", "--git-dir"])
-        .output()
-        .context("failed to run git rev-parse --git-dir")?;
-
-    if !output.status.success() {
-        return Err(anyhow!(
-            "git rev-parse --git-dir exited with status {:?}",
-            output.status.code()
-        ));
-    }
-
-    let dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Ok(PathBuf::from(dir))
-}
-
-/// Write the commit message into .git/COMMIT_EDITMSG so the next `git commit`
-/// will use it as the default message in the editor.
-pub fn write_commit_editmsg(message: &str) -> Result<()> {
-    let dir = git_dir()?;
-    let path = dir.join("COMMIT_EDITMSG");
-    fs::write(&path, message)
-        .with_context(|| format!("failed to write commit message to {:?}", path))?;
-    Ok(())
 }
 
 /// Get the current branch name.
