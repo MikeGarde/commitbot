@@ -1,0 +1,26 @@
+diff --git a/src/auth.rs b/src/auth.rs
+index 1234567..abcdefg 100644
+--- a/src/auth.rs
++++ b/src/auth.rs
+@@ -10,6 +10,25 @@ use crate::models::User;
+ pub struct AuthService {
+     secret_key: String,
++    token_expiry: u64,
++}
++
++impl AuthService {
++    pub fn validate_token(&self, token: &str) -> Result<User, AuthError> {
++        let decoded = decode::<Claims>(
++            token,
++            &DecodingKey::from_secret(self.secret_key.as_bytes()),
++            &Validation::default(),
++        )?;
++        
++        if decoded.claims.exp < current_timestamp() {
++            return Err(AuthError::TokenExpired);
++        }
++        
++        User::find_by_id(decoded.claims.sub)
++            .ok_or(AuthError::UserNotFound)
++    }
+ }

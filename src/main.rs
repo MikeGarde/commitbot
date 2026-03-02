@@ -433,8 +433,24 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
 
 /// Simple mode: one-shot commit message from entire staged diff.
 fn run_simple(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
-    let branch = current_branch()?;
-    let diff = staged_diff()?;
+    // Support diff mode for prompt testing
+    let (branch, diff) = if let Some(ref diff_file) = cli.diff {
+        let diff = if diff_file == "-" {
+            // Read from stdin
+            use std::io::Read;
+            let mut buffer = String::new();
+            io::stdin().read_to_string(&mut buffer)?;
+            buffer
+        } else {
+            std::fs::read_to_string(diff_file)
+                .map_err(|e| anyhow!("Failed to read test diff file '{}': {}", diff_file, e))?
+        };
+        (cli.branch.clone(), diff)
+    } else {
+        let branch = current_branch()?;
+        let diff = staged_diff()?;
+        (branch, diff)
+    };
 
     if diff.trim().is_empty() {
         println!("No staged changes found.");
@@ -547,6 +563,21 @@ fn main() -> Result<()> {
 
     // Initialize logging
     logging::init_logger(cli.verbose);
+
+    // Validate incompatible flag combinations
+    if cli.diff.is_some() && cli.ask {
+        return Err(anyhow!(
+            "The --diff flag cannot be used with --ask mode.\n\
+             Interactive mode requires real git staged files for per-file categorization."
+        ));
+    }
+
+    if cli.diff.is_some() && matches!(&cli.command, Some(Command::Pr { .. })) {
+        return Err(anyhow!(
+            "The --diff flag cannot be used with the 'pr' command.\n\
+             PR mode analyzes commit history, not staged diffs."
+        ));
+    }
 
     let cfg = Config::from_sources(&cli);
 

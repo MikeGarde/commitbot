@@ -195,11 +195,18 @@ impl LlmClient for OpenAiClient {
     ) -> Result<String> {
         let prompts = prompt_builder::file_summary_prompt(branch, file, ticket_summary);
 
-        log::debug!(
-            "Per-file summarize prompt for {} ({:?}):\n{}",
+        log::info!(
+            "Per-file summarize prompt for {} ({:?}) [truncated]:\n{}",
             file.path,
             file.category,
-            truncate(&prompts.user, 2000)
+            truncate(&prompts.user, 1000)
+        );
+        log::debug!(
+            "Per-file summarize prompt for {} ({:?}) [full]:\n--- SYSTEM ---\n{}\n--- USER ---\n{}",
+            file.path,
+            file.category,
+            prompts.system,
+            prompts.user
         );
 
         let req = ChatRequest {
@@ -229,9 +236,14 @@ impl LlmClient for OpenAiClient {
     ) -> Result<String> {
         let prompts = prompt_builder::commit_message_prompt(branch, files, ticket_summary);
 
+        log::info!(
+            "Final commit-message prompt [truncated]:\n{}",
+            truncate(&prompts.user, 1000)
+        );
         log::debug!(
-            "Final commit-message prompt:\n{}",
-            truncate(&prompts.user, 3000)
+            "Final commit-message prompt [full]:\n--- SYSTEM ---\n{}\n--- USER ---\n{}",
+            prompts.system,
+            prompts.user
         );
 
         let req = ChatRequest {
@@ -261,9 +273,14 @@ impl LlmClient for OpenAiClient {
     ) -> Result<String> {
         let prompts = prompt_builder::commit_message_simple_prompt(branch, diff, ticket_summary);
 
-        log::trace!(
-            "Simple commit-message prompt:\n{}",
-            truncate(&prompts.user, 3000)
+        log::info!(
+            "Simple commit-message prompt [truncated]:\n{}",
+            truncate(&prompts.user, 1000)
+        );
+        log::debug!(
+            "Simple commit-message prompt [full]:\n--- SYSTEM ---\n{}\n--- USER ---\n{}",
+            prompts.system,
+            prompts.user
         );
 
         let req = ChatRequest {
@@ -296,9 +313,14 @@ impl LlmClient for OpenAiClient {
         let prompts =
             prompt_builder::pr_message_prompt(base_branch, from_branch, mode, items, ticket_summary);
 
-        log::trace!(
-            "PR description prompt:\n{}",
-            truncate(&prompts.user, 3500)
+        log::info!(
+            "PR description prompt [truncated]:\n{}",
+            truncate(&prompts.user, 1000)
+        );
+        log::debug!(
+            "PR description prompt [full]:\n--- SYSTEM ---\n{}\n--- USER ---\n{}",
+            prompts.system,
+            prompts.user
         );
 
         let req = ChatRequest {

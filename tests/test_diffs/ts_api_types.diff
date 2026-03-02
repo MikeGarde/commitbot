@@ -1,0 +1,36 @@
+diff --git a/src/types/api.ts b/src/types/api.ts
+index eee5555..fff6666 100644
+--- a/src/types/api.ts
++++ b/src/types/api.ts
+@@ -1,8 +1,32 @@
+-export interface User {
++export interface BaseEntity {
++  id: string;
++  createdAt: Date;
++  updatedAt: Date;
++}
++
++export interface User extends BaseEntity {
+   id: string;
+   email: string;
+   name: string;
+-  createdAt: Date;
++  role: UserRole;
++}
++
++export type UserRole = 'admin' | 'user' | 'guest';
++
++export interface ApiResponse<T> {
++  data: T;
++  success: boolean;
++  message?: string;
++}
++
++export interface PaginatedResponse<T> extends ApiResponse<T[]> {
++  pagination: {
++    page: number;
++    pageSize: number;
++    totalPages: number;
++    totalItems: number;
++  };
+ }

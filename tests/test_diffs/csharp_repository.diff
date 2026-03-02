@@ -1,0 +1,81 @@
+diff --git a/src/Data/Repository.cs b/src/Data/Repository.cs
+new file mode 100644
+index 0000000..fedcba9
+--- /dev/null
++++ b/src/Data/Repository.cs
+@@ -0,0 +1,42 @@
++using System.Linq.Expressions;
++using Microsoft.EntityFrameworkCore;
++
++namespace App.Data;
++
++public class Repository<T> : IRepository<T> where T : class
++{
++    private readonly DbContext _context;
++    private readonly DbSet<T> _dbSet;
++
++    public Repository(DbContext context)
++    {
++        _context = context;
++        _dbSet = context.Set<T>();
++    }
++
++    public async Task<T?> GetByIdAsync(int id)
++        => await _dbSet.FindAsync(id);
++
++    public async Task<IEnumerable<T>> GetAllAsync()
++        => await _dbSet.ToListAsync();
++
++    public async Task<IEnumerable<T>> FindAsync(Expression<Func<T, bool>> predicate)
++        => await _dbSet.Where(predicate).ToListAsync();
++
++    public async Task AddAsync(T entity)
++    {
++        awadiff --git a/src/Data/Repository.cs b/src/Data/Repository.cs
+new file mode 100644
+index 0000000..fedcsknew file mode 100644
+index 0000000..fedcba9
+--- /dev/null
++);index 0000000..fedcnt--- /dev/null
++++ b/s);+++ b/src/Da  @@ -0,0 +1,42 @@
++using Sysyn+using System.L  +using Microsoft.EntityFramewoy)+
++namespace App.Data;
++
++public clasAsy+
++public class Rep
+cat > /Users/mikegarde/dev/github-mikegarde/commitbot/tests/test_diffs/ruby_soft_delete.diff << 'EOF'
+diff --git a/app/models/concerns/soft_deletable.rb b/app/models/concerns/soft_deletable.rb
+new file mode 100644
+index 0000000..1234abc
+--- /dev/null
++++ b/app/models/concerns/soft_deletable.rb
+@@ -0,0 +1,28 @@
++module SoftDeletable
++  extend ActiveSupport::Concern
++
++  included do
++    default_scope { where(deleted_at: nil) }
++    scope :with_deleted, -> { unscope(where: :deleted_at) }
++    scope :only_deleted, -> { with_deleted.where.not(deleted_at: nil) }
++  end
++
++  def soft_delete
++    update(deleted_at: Time.current)
++  end
++
++  def restore
++    update(deleted_at: nil)
++  end
++
++  def deleted?
++    deleted_at.present?
++  end
++
++  def destroy
++    soft_delete
++  end
++
++  def really_destroy!
++    with_deleted { super }
++  end
++end

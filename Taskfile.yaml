@@ -17,6 +17,11 @@ tasks:
       - cargo clippy --all-targets --all-features -- -D warnings
       - cargo test --all-features
 
+  test:prompts:
+    desc: "Run prompt tests"
+    cmds:
+      - cargo test --test prompt_live -- --nocapture
+
   run:simple:
     desc: "Run commitbot in simple mode (no model, debug) using cargo run"
     cmds:

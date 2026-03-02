@@ -34,8 +34,7 @@ export OPENAI_API_KEY="sk-..."
 ### Homebrew
 
 ```bash
-brew tap mikegarde/tap
-brew install commitbot
+brew install mikegarde/tap/commitbot
 ```
 
 ---
@@ -70,6 +69,30 @@ For each file, select:
 ```
 
 After all files are classified, Commitbot summarizes and generates the full commit message.
+
+---
+
+### Using External Diffs
+
+Generate commit messages from a saved diff file instead of git staged changes:
+
+```bash
+# From a diff file
+commitbot --diff my-changes.diff
+
+# With a custom branch name for context
+commitbot --diff my-changes.diff --branch feature/ISSUE-123-auth
+
+# From stdin (pipe a diff)
+git diff HEAD~3 | commitbot --diff -
+```
+
+This is useful for:
+- Testing prompt changes with consistent sample diffs
+- Generating messages for diffs from other sources
+- Reviewing historical changes
+
+> **Note:** The `--diff` flag cannot be used with `--ask` mode (which requires real git staged files for per-file categorization) or the `pr` command.
 
 ---
 

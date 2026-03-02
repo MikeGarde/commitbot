@@ -50,6 +50,15 @@ pub struct Cli {
     #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
     pub verbose: u8,
 
+    /// Read diff from a file instead of git staged changes (use "-" for stdin).
+    /// Cannot be used with --ask mode.
+    #[arg(long, global = true, value_name = "FILE")]
+    pub diff: Option<String>,
+
+    /// Branch name to use in the commit message context (used with --diff).
+    #[arg(long, global = true, default_value = "feature/test-branch")]
+    pub branch: String,
+
     /// Subcommand (e.g. 'pr')
     #[command(subcommand)]
     pub command: Option<Command>,
