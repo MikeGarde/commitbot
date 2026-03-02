@@ -1,10 +1,10 @@
 use crate::{git, Cli};
+use git::detect_repo_id;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
-use std::path::PathBuf;
-use git::detect_repo_id;
+use std::path::{Path, PathBuf};
 
 /// Final resolved configuration for commitbot.
 #[derive(Debug, Clone)]
@@ -21,96 +21,31 @@ impl Config {
     /// Build the final config from CLI flags, environment, TOML file, and defaults.
     ///
     /// Precedence (highest to lowest):
-    ///   1. CLI flags (`--provider`, `--model`, `--api-key`, `--base-url`, `--max`, `--stream`)
-    ///   2. Env vars (`COMMITBOT_PROVIDER`, `COMMITBOT_MODEL`, `OPENAI_API_KEY`, `COMMITBOT_BASE_URL`, `COMMITBOT_MAX_CONCURRENT_REQUESTS`, `COMMITBOT_STREAM`)
-    ///   3. Per-repo table in `~/.config/commitbot.toml` (e.g. ["mikegarde/commitbot"])
-    ///   4. [default] table in `~/.config/commitbot.toml`
-    ///   5. Hardcoded defaults (model = "gpt-5-nano", max_concurrent_requests = 4)
+    ///   1. CLI flags
+    ///   2. Env vars
+    ///   3. Per-repo table in config file (e.g. ["mikegarde/commitbot"])
+    ///   4. [default] table in config file
+    ///   5. Hardcoded defaults
     pub fn from_sources(cli: &Cli) -> Self {
-        let file_cfg_root = load_file_config().unwrap_or_default();
-        let repo_id = detect_repo_id();
+        let r = ConfigResolver::new(cli);
 
-        // Split file config into [default] and repo-specific override (if any).
-        let default_file_cfg = file_cfg_root.default.unwrap_or_default();
-        let repo_file_cfg = repo_id
-            .as_deref()
-            .and_then(|id| file_cfg_root.repos.get(id))
-            .cloned()
-            .unwrap_or_default();
+        let provider = r.get_string("provider", "openai").to_lowercase();
+        let model = r.get_string("model", "gpt-5-nano");
 
-        // CLI values
-        let provider_cli = cli.provider.clone();
-        let model_cli = cli.model.clone();
-        let api_key_cli = cli.api_key.clone();
-        let base_url_cli = cli.url.clone();
-        let max_cli = cli.max;
-        let stream_cli = cli.stream;
+        // secrets: logged as <set>/<unset>
+        let openai_api_key = r.get_secret_opt_string("openai_api_key");
 
-        // Env values
-        let provider_env = env::var("COMMITBOT_PROVIDER").ok();
-        let model_env = env::var("COMMITBOT_MODEL").ok();
-        let api_key_env = env::var("OPENAI_API_KEY").ok();
-        let base_url_env = env::var("COMMITBOT_BASE_URL").ok();
-        let max_env = env::var("COMMITBOT_MAX_CONCURRENT_REQUESTS")
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok());
-        let stream_env = env::var("COMMITBOT_STREAM")
-            .ok()
-            .and_then(|s| s.parse::<bool>().ok());
+        // optional
+        let base_url = r.get_opt_string("base_url");
 
-        // Resolve provider
-        let provider = provider_cli
-            .or(provider_env)
-            .or(repo_file_cfg.provider)
-            .or(default_file_cfg.provider)
-            .unwrap_or_else(|| "openai".to_string())
-            .to_lowercase();
+        let max_concurrent_requests = r.get_usize("max_concurrent_requests", 4);
+        let stream = r.get_bool("stream", true);
 
-        // Resolve model
-        let model = model_cli
-            .or(model_env)
-            .or(repo_file_cfg.model)
-            .or(default_file_cfg.model)
-            .unwrap_or_else(|| "gpt-5-nano".to_string());
-
-        // Resolve API key (only required for OpenAI-style providers)
-        let openai_api_key = api_key_cli
-            .or(api_key_env)
-            .or(repo_file_cfg.openai_api_key)
-            .or(default_file_cfg.openai_api_key);
-
-        // Resolve base URL (used for ollama or openai-compatible endpoints)
-        let base_url = base_url_cli
-            .or(base_url_env)
-            .or(repo_file_cfg.base_url)
-            .or(default_file_cfg.base_url);
-
-        // Resolve max concurrency; default to 4 if not specified anywhere
-        let max_concurrent_requests = max_cli
-            .or(max_env)
-            .or(repo_file_cfg.max_concurrent_requests)
-            .or(default_file_cfg.max_concurrent_requests)
-            .unwrap_or(4);
-
-        let stream = stream_cli
-            .or(stream_env)
-            .or(repo_file_cfg.stream)
-            .or(default_file_cfg.stream)
-            .unwrap_or(true);
-
+        // Cleanup: trim stray quotes if any upstream included them
         let provider = provider.trim_matches('"').to_string();
         let model = model.trim_matches('"').to_string();
         let openai_api_key = openai_api_key.map(|s| s.trim_matches('"').to_string());
         let base_url = base_url.map(|s| s.trim_matches('"').to_string());
-
-        let url = base_url.clone().unwrap_or_default();
-
-        log::debug!("Provider: {}", provider);
-        log::debug!("Model:    {}", model);
-        log::debug!("API key:  {}", openai_api_key.is_some());
-        log::debug!("URL:      {}", url);
-        log::debug!("Max Req:  {}", max_concurrent_requests);
-        log::debug!("Stream:   {}", stream);
 
         if provider == "openai" && openai_api_key.is_none() {
             panic!("OPENAI_API_KEY must be set via CLI, env var, or config file for provider=openai");
@@ -129,11 +64,10 @@ impl Config {
 
 #[derive(Debug, Default, Deserialize, Clone)]
 struct FileConfig {
-    /// LLM provider / API style (openai or ollama).
     pub provider: Option<String>,
-    /// Default model to use when not provided via CLI or env.
     pub model: Option<String>,
     pub openai_api_key: Option<String>,
+    #[serde(alias = "url")]
     pub base_url: Option<String>,
     pub max_concurrent_requests: Option<usize>,
     pub stream: Option<bool>,
@@ -150,18 +84,354 @@ struct FileConfigRoot {
     pub repos: HashMap<String, FileConfig>,
 }
 
-/// Return `~/.config/commitbot.toml`
-fn config_path() -> Option<PathBuf> {
-    let home = dirs::home_dir()?;
-    Some(home.join(".config").join("commitbot.toml"))
+#[derive(Debug, Clone, Copy)]
+enum ValueSource {
+    Hardcoded,
+    FileDefault,
+    FileRepo,
+    Env,
+    Cli,
 }
 
-fn load_file_config() -> Option<FileConfigRoot> {
-    let path = config_path()?;
-    if !path.exists() {
-        return None;
+fn source_label(s: ValueSource) -> &'static str {
+    match s {
+        ValueSource::Cli => "cli",
+        ValueSource::Env => "env",
+        ValueSource::FileRepo => "file:[repo]",
+        ValueSource::FileDefault => "file:[default]",
+        ValueSource::Hardcoded => "hardcoded",
+    }
+}
+
+struct ConfigResolver<'a> {
+    cli: &'a Cli,
+    repo_id: Option<String>,
+    file_default: FileConfig,
+    file_repo: FileConfig,
+}
+
+impl<'a> ConfigResolver<'a> {
+    pub fn new(cli: &'a Cli) -> Self {
+        // config file string (cli > env > default string)
+        let config_file_to_use: String = cli
+            .config
+            .clone()
+            .or_else(|| env::var("COMMITBOT_CONFIG").ok())
+            .unwrap_or_else(|| "~/.config/commitbot.toml".to_string());
+
+        let config_path = expand_tilde_to_path(&config_file_to_use);
+        log::debug!("Config File: {}", config_path.display());
+
+        let root = load_file_config_from_path(&config_path);
+
+        let repo_id = detect_repo_id();
+        log::debug!("Repo ID: {:?}", repo_id);
+
+        let file_default = root.default.clone().unwrap_or_default();
+        let file_repo = repo_id
+            .as_deref()
+            .and_then(|id| root.repos.get(id))
+            .cloned()
+            .unwrap_or_default();
+
+        if let Some(id) = repo_id.as_deref() {
+            log::debug!("Repo table present: {}", root.repos.contains_key(id));
+        }
+
+        Self {
+            cli,
+            repo_id,
+            file_default,
+            file_repo,
+        }
     }
 
-    let data = fs::read_to_string(&path).ok()?;
-    toml::from_str::<FileConfigRoot>(&data).ok()
+    fn env_key_for(&self, key: &str) -> Option<&'static str> {
+        match key {
+            "provider" => Some("COMMITBOT_PROVIDER"),
+            "model" => Some("COMMITBOT_MODEL"),
+            "openai_api_key" => Some("OPENAI_API_KEY"),
+            "base_url" => Some("COMMITBOT_BASE_URL"),
+            "max_concurrent_requests" => Some("COMMITBOT_MAX_CONCURRENT_REQUESTS"),
+            "stream" => Some("COMMITBOT_STREAM"),
+            _ => None,
+        }
+    }
+
+    // ---- FILE SOURCES ----
+
+    fn file_string(&self, key: &str, repo: bool) -> Option<String> {
+        let cfg = if repo { &self.file_repo } else { &self.file_default };
+        match key {
+            "provider" => cfg.provider.clone(),
+            "model" => cfg.model.clone(),
+            "openai_api_key" => cfg.openai_api_key.clone(),
+            "base_url" => cfg.base_url.clone(),
+            _ => None,
+        }
+    }
+
+    fn file_usize(&self, key: &str, repo: bool) -> Option<usize> {
+        let cfg = if repo { &self.file_repo } else { &self.file_default };
+        match key {
+            "max_concurrent_requests" => cfg.max_concurrent_requests,
+            _ => None,
+        }
+    }
+
+    fn file_bool(&self, key: &str, repo: bool) -> Option<bool> {
+        let cfg = if repo { &self.file_repo } else { &self.file_default };
+        match key {
+            "stream" => cfg.stream,
+            _ => None,
+        }
+    }
+
+    // ---- ENV SOURCES ----
+
+    fn env_string(&self, key: &str) -> Option<String> {
+        let env_key = self.env_key_for(key)?;
+        env::var(env_key).ok()
+    }
+
+    fn env_usize(&self, key: &str) -> Option<usize> {
+        let env_key = self.env_key_for(key)?;
+        env::var(env_key).ok().and_then(|s| s.parse::<usize>().ok())
+    }
+
+    fn env_bool(&self, key: &str) -> Option<bool> {
+        let env_key = self.env_key_for(key)?;
+        env::var(env_key).ok().and_then(|s| s.parse::<bool>().ok())
+    }
+
+    // Expectation for a stream flag:
+    //   - `--no-stream` present => stream = Some(false)
+    //   - absent                => stream = None (file/env/default wins)
+    fn cli_string(&self, key: &str) -> Option<String> {
+        match key {
+            "provider" => self.cli.provider.clone(),
+            "model" => self.cli.model.clone(),
+            "openai_api_key" => self.cli.api_key.clone(),
+            "base_url" => self.cli.url.clone(),
+            _ => None,
+        }
+    }
+
+    fn cli_usize(&self, key: &str) -> Option<usize> {
+        match key {
+            "max_concurrent_requests" => self.cli.max,
+            _ => None,
+        }
+    }
+
+    fn cli_bool(&self, key: &str) -> Option<bool> {
+        match key {
+            "stream" => self.cli.no_stream.then_some(false),
+            _ => None,
+        }
+    }
+
+    fn log_decision<T: std::fmt::Debug>(&self, key: &str, value: &T, src: ValueSource) {
+        if let Some(env_key) = self.env_key_for(key) {
+            log::debug!(
+                "Config: {} = {:?} (source={}, env={})",
+                key,
+                value,
+                source_label(src),
+                env_key
+            );
+        } else {
+            log::debug!(
+                "Config: {} = {:?} (source={})",
+                key,
+                value,
+                source_label(src)
+            );
+        }
+    }
+
+    fn log_decision_secret_opt_string(&self, key: &str, present: bool, src: ValueSource) {
+        let printable = if present { "<set>" } else { "<unset>" };
+        if let Some(env_key) = self.env_key_for(key) {
+            log::debug!(
+                "Config: {} = {} (source={}, env={})",
+                key,
+                printable,
+                source_label(src),
+                env_key
+            );
+        } else {
+            log::debug!(
+                "Config: {} = {} (source={})",
+                key,
+                printable,
+                source_label(src)
+            );
+        }
+    }
+
+    /// Resolve a required string.
+    pub fn get_string(&self, key: &str, default: &str) -> String {
+        let mut value = default.to_string();
+        let mut src = ValueSource::Hardcoded;
+
+        if let Some(v) = self.file_string(key, false) {
+            value = v;
+            src = ValueSource::FileDefault;
+        }
+        if let Some(v) = self.file_string(key, true) {
+            value = v;
+            src = ValueSource::FileRepo;
+        }
+        if let Some(v) = self.env_string(key) {
+            value = v;
+            src = ValueSource::Env;
+        }
+        if let Some(v) = self.cli_string(key) {
+            value = v;
+            src = ValueSource::Cli;
+        }
+
+        self.log_decision(key, &value, src);
+        value
+    }
+
+    /// Resolve an optional string (None if not set anywhere).
+    pub fn get_opt_string(&self, key: &str) -> Option<String> {
+        let mut value: Option<String> = None;
+        let mut src = ValueSource::Hardcoded;
+
+        if let Some(v) = self.file_string(key, false) {
+            value = Some(v);
+            src = ValueSource::FileDefault;
+        }
+        if let Some(v) = self.file_string(key, true) {
+            value = Some(v);
+            src = ValueSource::FileRepo;
+        }
+        if let Some(v) = self.env_string(key) {
+            value = Some(v);
+            src = ValueSource::Env;
+        }
+        if let Some(v) = self.cli_string(key) {
+            value = Some(v);
+            src = ValueSource::Cli;
+        }
+
+        self.log_decision(key, &value, src);
+        value
+    }
+
+    /// Resolve an optional secret string; logs <set>/<unset> only.
+    pub fn get_secret_opt_string(&self, key: &str) -> Option<String> {
+        let mut value: Option<String> = None;
+        let mut src = ValueSource::Hardcoded;
+
+        if let Some(v) = self.file_string(key, false) {
+            value = Some(v);
+            src = ValueSource::FileDefault;
+        }
+        if let Some(v) = self.file_string(key, true) {
+            value = Some(v);
+            src = ValueSource::FileRepo;
+        }
+        if let Some(v) = self.env_string(key) {
+            value = Some(v);
+            src = ValueSource::Env;
+        }
+        if let Some(v) = self.cli_string(key) {
+            value = Some(v);
+            src = ValueSource::Cli;
+        }
+
+        self.log_decision_secret_opt_string(key, value.is_some(), src);
+        value
+    }
+
+    /// Resolve a usize.
+    pub fn get_usize(&self, key: &str, default: usize) -> usize {
+        let mut value = default;
+        let mut src = ValueSource::Hardcoded;
+
+        if let Some(v) = self.file_usize(key, false) {
+            value = v;
+            src = ValueSource::FileDefault;
+        }
+        if let Some(v) = self.file_usize(key, true) {
+            value = v;
+            src = ValueSource::FileRepo;
+        }
+        if let Some(v) = self.env_usize(key) {
+            value = v;
+            src = ValueSource::Env;
+        }
+        if let Some(v) = self.cli_usize(key) {
+            value = v;
+            src = ValueSource::Cli;
+        }
+
+        self.log_decision(key, &value, src);
+        value
+    }
+
+    /// Resolve a bool.
+    pub fn get_bool(&self, key: &str, default: bool) -> bool {
+        let mut value = default;
+        let mut src = ValueSource::Hardcoded;
+
+        if let Some(v) = self.file_bool(key, false) {
+            value = v;
+            src = ValueSource::FileDefault;
+        }
+        if let Some(v) = self.file_bool(key, true) {
+            value = v;
+            src = ValueSource::FileRepo;
+        }
+        if let Some(v) = self.env_bool(key) {
+            value = v;
+            src = ValueSource::Env;
+        }
+        if let Some(v) = self.cli_bool(key) {
+            value = v;
+            src = ValueSource::Cli;
+        }
+
+        self.log_decision(key, &value, src);
+        value
+    }
+
+    #[allow(dead_code)]
+    pub fn repo_id(&self) -> Option<&str> {
+        self.repo_id.as_deref()
+    }
+}
+
+fn expand_tilde_to_path(s: &str) -> PathBuf {
+    if let (Some(rest), Some(home)) = (s.strip_prefix("~/"), env::var_os("HOME")) {
+        return PathBuf::from(home).join(rest);
+    }
+    PathBuf::from(s)
+}
+
+fn load_file_config_from_path(path: &Path) -> FileConfigRoot {
+    if !path.exists() {
+        log::warn!("Config file not found: {}", path.display());
+        return FileConfigRoot::default();
+    }
+
+    let data = match fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(err) => {
+            log::warn!("Failed to read config file {}: {}", path.display(), err);
+            return FileConfigRoot::default();
+        }
+    };
+
+    match toml::from_str::<FileConfigRoot>(&data) {
+        Ok(cfg) => cfg,
+        Err(err) => {
+            log::warn!("Invalid TOML in {}: {}", path.display(), err);
+            FileConfigRoot::default()
+        }
+    }
 }

@@ -87,13 +87,6 @@ commitbot --diff my-changes.diff --branch feature/ISSUE-123-auth
 git diff HEAD~3 | commitbot --diff -
 ```
 
-This is useful for:
-- Testing prompt changes with consistent sample diffs
-- Generating messages for diffs from other sources
-- Reviewing historical changes
-
-> **Note:** The `--diff` flag cannot be used with `--ask` mode (which requires real git staged files for per-file categorization) or the `pr` command.
-
 ---
 
 ### Pull Request Summaries
@@ -119,12 +112,14 @@ Commitbot automatically loads its configuration from [~/.config/commitbot.toml](
 Settings can be defined globally in this file, overridden by environment variables, or specified directly through CLI flags.
 Per-project configurations are also supported for repository-specific overrides.
 
+> Note: Repository names are case-sensitive.
+
 Example:
 
 ```toml
 model = "gpt-4o-mini"
 
-["mikegarde/commitbot"]
+["MikeGarde/commitbot"]
 model = "gpt-5-nano"
 ```
 
@@ -133,6 +128,7 @@ model = "gpt-5-nano"
 ## Roadmap
 
 - [x] Support for local/offline LLMs (Ollama, LM Studio).
+- [ ] Support for Anthropic's Claude.
 - [ ] Model auto-detection and fallback.
 - [ ] Configurable commit message templates.
 - [ ] Integration with GitHub Actions or CI pipelines.

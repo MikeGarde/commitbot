@@ -36,20 +36,6 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub url: Option<String>,
 
-    /// Stream responses as they are generated (use `--stream=false` to disable)
-    #[arg(
-        long,
-        global = true,
-        default_missing_value = "true",
-        num_args = 0..=1,
-        value_parser = clap::value_parser!(bool)
-    )]
-    pub stream: Option<bool>,
-
-    /// Increase verbosity (-v, -vv, -vvv)
-    #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
-    pub verbose: u8,
-
     /// Read diff from a file instead of git staged changes (use "-" for stdin).
     /// Cannot be used with --ask mode.
     #[arg(long, global = true, value_name = "FILE")]
@@ -58,6 +44,18 @@ pub struct Cli {
     /// Branch name to use in the commit message context (used with --diff).
     #[arg(long, global = true, default_value = "feature/test-branch")]
     pub branch: String,
+
+    /// Disable streaming responses (streaming is on by default)
+    #[arg(long, global = true)]
+    pub no_stream: bool,
+
+    /// Increase verbosity (-v, -vv, -vvv)
+    #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
+    pub verbose: u8,
+
+    /// Define config file (default: ~/.config/commitbot.toml)
+    #[arg(long, global = true, value_name = "FILE")]
+    pub config: Option<String>,
 
     /// Subcommand (e.g. 'pr')
     #[command(subcommand)]

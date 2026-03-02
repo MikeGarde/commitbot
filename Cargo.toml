@@ -37,3 +37,7 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = "symbols"
+
+[profile.dev]
+debug = 2
+opt-level = 0
