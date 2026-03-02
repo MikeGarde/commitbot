@@ -52,12 +52,6 @@ pub fn current_branch() -> Result<String> {
     Ok(name)
 }
 
-/// Get the full staged diff.
-pub fn staged_diff() -> Result<String> {
-    let diff = git_output(&["diff", "--cached"])?;
-    Ok(diff)
-}
-
 /// Get a list of staged files.
 pub fn staged_files() -> Result<Vec<String>> {
     let output = git_output(&["diff", "--cached", "--name-only"])?;
@@ -154,6 +148,42 @@ pub fn collect_pr_items(base: &str, from: &str) -> Result<Vec<PrItem>> {
     }
 
     Ok(items)
+}
+
+/// Split a combined diff string into (path, diff) pairs, one per file.
+/// Handles both `diff --git` headers and legacy `--- a/` headers.
+pub fn split_diff_by_file(diff: &str) -> Vec<(String, String)> {
+    let mut results = Vec::new();
+    let mut current_path: Option<String> = None;
+    let mut current_lines: Vec<&str> = Vec::new();
+
+    for line in diff.lines() {
+        if line.starts_with("diff --git ") {
+            // Save previous file
+            if let Some(path) = current_path.take() {
+                results.push((path, current_lines.join("\n")));
+            }
+            current_lines = vec![line];
+
+            // Extract path from "diff --git a/foo b/foo"
+            let path = line
+                .split_whitespace()
+                .last()
+                .and_then(|s| s.strip_prefix("b/"))
+                .unwrap_or("")
+                .to_string();
+            current_path = Some(path);
+        } else {
+            current_lines.push(line);
+        }
+    }
+
+    // Flush the last file
+    if let Some(path) = current_path.take() {
+        results.push((path, current_lines.join("\n")));
+    }
+
+    results
 }
 
 /// Stage all new, modified, and deleted files

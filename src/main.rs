@@ -18,8 +18,8 @@ use std::time::Duration;
 
 use crate::cli_args::{Cli, Command};
 use crate::git::{
-    collect_pr_items, current_branch, staged_diff, staged_diff_for_file, staged_files, stage_all,
-    PrSummaryMode,
+    collect_pr_items, current_branch, split_diff_by_file, staged_diff_for_file, staged_files,
+    stage_all, PrSummaryMode,
 };
 use crate::llm::LlmClient;
 
@@ -222,6 +222,7 @@ fn summarize_files_concurrently(
 
     // Process in chunks of `max_concurrent` so we never have more than that many
     // in-flight LLM calls at once.
+    let total_files = file_changes.len();
     for chunk in indices.chunks(max_concurrent) {
         thread::scope(|scope| {
             for &file_idx in chunk {
@@ -253,6 +254,8 @@ fn summarize_files_concurrently(
                         let summary = ctx.llm.summarize_file(
                             ctx.branch,
                             &fc,
+                            file_idx,
+                            total_files,
                             ctx.ticket_summary,
                         )?;
                         Ok(summary)
@@ -309,13 +312,42 @@ fn summarize_files_concurrently(
 }
 
 /// Interactive mode: classify files, then do all LLM calls afterward (batched with concurrency).
+/// Supports --diff for prompt testing (splits combined diff into per-file entries).
 fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
-    let branch = current_branch()?;
-    let files = staged_files()?;
-    if files.is_empty() {
-        println!("No staged changes found.");
-        return Ok(());
-    }
+    // Build (branch, file_pairs) — works with both staged git and --diff.
+    let (branch, file_pairs) = if let Some(ref diff_arg) = cli.diff {
+        let combined = if diff_arg == "-" {
+            use std::io::Read;
+            let mut buf = String::new();
+            io::stdin().read_to_string(&mut buf)?;
+            buf
+        } else {
+            std::fs::read_to_string(diff_arg)
+                .map_err(|e| anyhow!("Failed to read diff file '{}': {}", diff_arg, e))?
+        };
+        if combined.trim().is_empty() {
+            println!("No diff content found.");
+            return Ok(());
+        }
+        let mut per_file = split_diff_by_file(&combined);
+        if per_file.is_empty() {
+            per_file = vec![("(diff)".to_string(), combined)];
+        }
+        (cli.branch.clone(), per_file)
+    } else {
+        let branch = current_branch()?;
+        let files = staged_files()?;
+        if files.is_empty() {
+            println!("No staged changes found.");
+            return Ok(());
+        }
+        let mut pairs = Vec::new();
+        for path in files {
+            let diff = staged_diff_for_file(&path)?;
+            pairs.push((path, diff));
+        }
+        (branch, pairs)
+    };
 
     let mut ticket_summary = resolved_ticket_summary(cli);
     if ticket_summary.is_none() {
@@ -327,14 +359,12 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
 
     let mut file_changes: Vec<FileChange> = Vec::new();
 
-    // Phase 1: Cointeractive classification
-    for (idx, path) in files.iter().enumerate() {
-        let diff = staged_diff_for_file(path)?;
-
-        let category = categorize_file_interactive(idx, files.len(), path)?;
-
+    // Phase 1: Interactive classification
+    let total_files = file_pairs.len();
+    for (idx, (path, diff)) in file_pairs.into_iter().enumerate() {
+        let category = categorize_file_interactive(idx, total_files, &path)?;
         file_changes.push(FileChange {
-            path: path.clone(),
+            path,
             category,
             diff,
             summary: None,
@@ -431,48 +461,118 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     Ok(())
 }
 
-/// Simple mode: one-shot commit message from entire staged diff.
-fn run_simple(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
-    // Support diff mode for prompt testing
-    let (branch, diff) = if let Some(ref diff_file) = cli.diff {
-        let diff = if diff_file == "-" {
-            // Read from stdin
+/// Auto mode (default): per-file LLM summaries then final commit message — no human classification.
+/// When `--diff` is supplied the combined diff is split by file; otherwise staged files are used.
+fn run_auto(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
+    let (branch, file_pairs): (String, Vec<(String, String)>) = if let Some(ref diff_arg) = cli.diff {
+        // Read the combined diff from file or stdin.
+        let combined = if diff_arg == "-" {
             use std::io::Read;
-            let mut buffer = String::new();
-            io::stdin().read_to_string(&mut buffer)?;
-            buffer
+            let mut buf = String::new();
+            io::stdin().read_to_string(&mut buf)?;
+            buf
         } else {
-            std::fs::read_to_string(diff_file)
-                .map_err(|e| anyhow!("Failed to read test diff file '{}': {}", diff_file, e))?
+            std::fs::read_to_string(diff_arg)
+                .map_err(|e| anyhow!("Failed to read diff file '{}': {}", diff_arg, e))?
         };
-        (cli.branch.clone(), diff)
+
+        if combined.trim().is_empty() {
+            println!("No diff content found.");
+            return Ok(());
+        }
+
+        let mut per_file = split_diff_by_file(&combined);
+        if per_file.is_empty() {
+            per_file = vec![("(diff)".to_string(), combined)];
+        }
+        (cli.branch.clone(), per_file)
     } else {
+        // Normal git mode: get per-file staged diffs.
         let branch = current_branch()?;
-        let diff = staged_diff()?;
-        (branch, diff)
+        let files = staged_files()?;
+        if files.is_empty() {
+            println!("No staged changes found.");
+            return Ok(());
+        }
+        let mut pairs = Vec::new();
+        for path in files {
+            let diff = staged_diff_for_file(&path)?;
+            pairs.push((path, diff));
+        }
+        (branch, pairs)
     };
 
-    if diff.trim().is_empty() {
-        println!("No staged changes found.");
-        return Ok(());
+    let ticket_summary = resolved_ticket_summary(cli);
+
+    // Build FileChange list — all files are categorized as Main automatically.
+    let mut file_changes: Vec<FileChange> = file_pairs
+        .into_iter()
+        .map(|(path, diff)| FileChange {
+            path,
+            category: FileCategory::Main,
+            diff,
+            summary: None,
+        })
+        .collect();
+
+    println!();
+    println!("Asking {}...", cfg.model);
+
+    let total = file_changes.len();
+    let mp = MultiProgress::new();
+    let mut file_lines = Vec::new();
+
+    for fc in &file_changes {
+        let line = mp.add(ProgressBar::new_spinner());
+        line.set_style(
+            ProgressStyle::with_template("{spinner:.cyan} {prefix:.bold}: {msg}")
+                .expect("progress style template"),
+        );
+        line.set_prefix(fc.path.clone());
+        line.enable_steady_tick(Duration::from_millis(120));
+        line.set_message("waiting");
+        file_lines.push(line);
     }
 
-    let ticket_summary = resolved_ticket_summary(cli);
+    let pb = mp.add(ProgressBar::new((total + 1) as u64));
+    pb.set_style(
+        ProgressStyle::with_template("{wide_bar:.green} {pos}/{len} files")
+            .unwrap_or_else(|_| ProgressStyle::default_bar()),
+    );
+
+    let indices_to_summarize: Vec<usize> = (0..total).collect();
+
+    log::info!(
+        "Auto-summarizing {} files. max_concurrent_requests = {}",
+        total,
+        cfg.max_concurrent_requests,
+    );
+
+    let ctx = SummarizeContext {
+        branch: &branch,
+        ticket_summary: ticket_summary.as_deref(),
+        llm,
+        max_concurrent_requests: cfg.max_concurrent_requests,
+    };
+
+    summarize_files_concurrently(
+        &mut file_changes,
+        &indices_to_summarize,
+        &ctx,
+        &pb,
+        Some(&file_lines),
+    )?;
+
+    pb.inc(1);
+    pb.finish_with_message("Done");
+
     println!();
 
     if cfg.stream {
-        let _msg = llm.generate_commit_message_simple(
-            &branch,
-            &diff,
-            ticket_summary.as_deref(),
-        )?;
+        let _msg = llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())?;
         println!();
     } else {
-        let msg = llm.generate_commit_message_simple(
-            &branch,
-            &diff,
-            ticket_summary.as_deref(),
-        )?;
+        let msg = llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())?;
         println!("{msg}");
     }
 
@@ -564,14 +664,6 @@ fn main() -> Result<()> {
     // Initialize logging
     logging::init_logger(cli.verbose);
 
-    // Validate incompatible flag combinations
-    if cli.diff.is_some() && cli.ask {
-        return Err(anyhow!(
-            "The --diff flag cannot be used with --ask mode.\n\
-             Interactive mode requires real git staged files for per-file categorization."
-        ));
-    }
-
     if cli.diff.is_some() && matches!(&cli.command, Some(Command::Pr { .. })) {
         return Err(anyhow!(
             "The --diff flag cannot be used with the 'pr' command.\n\
@@ -608,7 +700,7 @@ fn main() -> Result<()> {
             if cli.ask {
                 run_interactive(&cli, &cfg, boxed_client.as_ref())
             } else {
-                run_simple(&cli, &cfg, boxed_client.as_ref())
+                run_auto(&cli, &cfg, boxed_client.as_ref())
             }
         }
     }

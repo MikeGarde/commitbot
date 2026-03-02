@@ -3,7 +3,7 @@
 //! These tests actually invoke the commitbot binary with test diffs and
 //! validate the LLM output against various constraints.
 
-use assert_cmd::cargo::cargo_bin_cmd;
+use assert_cmd::cargo;
 use std::fs;
 use std::path::PathBuf;
 
@@ -100,7 +100,7 @@ fn run_commitbot_with_diff(diff_file: &str, branch: &str) -> Result<String, Stri
         return Err(format!("Diff file not found: {:?}", diff_path));
     }
 
-    let mut cmd = cargo_bin_cmd!("commitbot");
+    let mut cmd = cargo::cargo_bin_cmd!("commitbot");
 
     cmd.arg("--diff")
        .arg(&diff_path)

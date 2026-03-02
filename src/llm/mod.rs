@@ -15,6 +15,8 @@ pub trait LlmClient: Send + Sync {
         &self,
         branch: &str,
         file: &FileChange,
+        file_index: usize,
+        total_files: usize,
         ticket_summary: Option<&str>,
     ) -> Result<String>;
 
@@ -23,14 +25,6 @@ pub trait LlmClient: Send + Sync {
         &self,
         branch: &str,
         files: &[FileChange],
-        ticket_summary: Option<&str>,
-    ) -> Result<String>;
-
-    /// Simple mode: commit message from entire diff.
-    fn generate_commit_message_simple(
-        &self,
-        branch: &str,
-        diff: &str,
         ticket_summary: Option<&str>,
     ) -> Result<String>;
 
