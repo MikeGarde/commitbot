@@ -95,9 +95,12 @@ tasks:
     cmds:
       - task: test
       - sh devops/release.sh {{.VERSION}}
+      - task: install
       - task: publish:dry
       - task: publish
-      - cd ../homebrew-tap && gh workflow run update-formula.yml -f formula=commitbot -f repo=mikegarde/commitbot -f version={{.VERSION}}
+      - cd ../homebrew-tap && \
+        TAG=$(commitbot --version | awk '{print $2}') && \
+        gh workflow run update-formula.yml -f formula=commitbot -f repo=mikegarde/commitbot -f tag=$TAG
 
   publish:dry:
     desc: "Dry-run crates.io publish to verify packaging"
