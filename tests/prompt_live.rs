@@ -13,7 +13,6 @@ struct TestCase {
     language: &'static str,
     diff_file: &'static str,
     expected_keywords: Vec<&'static str>,
-    // Constraints (adjust these based on your prompt tuning goals)
     min_words: usize,
     max_words: usize,
     max_lines: usize,

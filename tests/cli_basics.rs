@@ -1,4 +1,4 @@
-use assert_cmd::{cargo}; // handy crate for testing CLIs
+use assert_cmd::{cargo};
 
 #[test]
 fn prints_help() {
