@@ -12,6 +12,8 @@ pub struct PromptPair {
 pub fn file_summary_prompt(
     branch: &str,
     file: &FileChange,
+    file_index: usize,
+    total_files: usize,
     ticket_summary: Option<&str>,
 ) -> PromptPair {
     let mut system = prompts::FILE_SUMMARY.to_owned();
@@ -22,11 +24,13 @@ pub fn file_summary_prompt(
 
     let user = format!(
         "Branch: {branch}\n\
-         File: {path}\n\
+         File {file_num} of {total_files}: {path}\n\
          Category: {category}\n\n\
          Diff:\n\
          ```diff\n{diff}\n```",
         branch = branch,
+        file_num = file_index + 1,
+        total_files = total_files,
         path = file.path,
         category = file.category.as_str(),
         diff = file.diff
@@ -51,26 +55,6 @@ pub fn commit_message_prompt(
         "Branch: {branch}\n\nPer-file summaries:\n\n{per_file}",
         branch = branch,
         per_file = per_file
-    );
-
-    PromptPair { system, user }
-}
-
-pub fn commit_message_simple_prompt(
-    branch: &str,
-    diff: &str,
-    ticket_summary: Option<&str>,
-) -> PromptPair {
-    let mut system = prompts::SYSTEM_INSTRUCTIONS.to_owned();
-    if let Some(ts) = ticket_summary {
-        system.push_str("\nOverall ticket goal: ");
-        system.push_str(ts);
-    }
-
-    let user = format!(
-        "Branch: {branch}\n\nDiff:\n```diff\n{diff}\n```",
-        branch = branch,
-        diff = diff
     );
 
     PromptPair { system, user }
@@ -182,10 +166,13 @@ pub fn pr_message_prompt(
 }
 
 fn render_per_file_summaries(files: &[FileChange]) -> String {
+    let total_files = files.len();
     let mut out = String::new();
-    for file in files.iter().filter(|f| !matches!(f.category, FileCategory::Ignored)) {
+    for (idx, file) in files.iter().enumerate().filter(|(_, f)| !matches!(f.category, FileCategory::Ignored)) {
         out.push_str(&format!(
-            "File: {path}\nCategory: {category}\nSummary:\n{summary}\n\n",
+            "File {file_num} of {total_files}: {path}\nCategory: {category}\nSummary:\n{summary}\n\n",
+            file_num = idx + 1,
+            total_files = total_files,
             path = file.path,
             category = file.category.as_str(),
             summary = file

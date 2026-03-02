@@ -136,9 +136,11 @@ impl LlmClient for OllamaClient {
         &self,
         branch: &str,
         file: &FileChange,
+        file_index: usize,
+        total_files: usize,
         ticket_summary: Option<&str>,
     ) -> Result<String> {
-        let prompts = prompt_builder::file_summary_prompt(branch, file, ticket_summary);
+        let prompts = prompt_builder::file_summary_prompt(branch, file, file_index, total_files, ticket_summary);
         self.chat(prompts.system, prompts.user, false)
     }
 
@@ -149,16 +151,6 @@ impl LlmClient for OllamaClient {
         ticket_summary: Option<&str>,
     ) -> Result<String> {
         let prompts = prompt_builder::commit_message_prompt(branch, files, ticket_summary);
-        self.chat(prompts.system, prompts.user, self.stream)
-    }
-
-    fn generate_commit_message_simple(
-        &self,
-        branch: &str,
-        diff: &str,
-        ticket_summary: Option<&str>,
-    ) -> Result<String> {
-        let prompts = prompt_builder::commit_message_simple_prompt(branch, diff, ticket_summary);
         self.chat(prompts.system, prompts.user, self.stream)
     }
 

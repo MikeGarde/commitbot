@@ -191,9 +191,11 @@ impl LlmClient for OpenAiClient {
         &self,
         branch: &str,
         file: &FileChange,
+        file_index: usize,
+        total_files: usize,
         ticket_summary: Option<&str>,
     ) -> Result<String> {
-        let prompts = prompt_builder::file_summary_prompt(branch, file, ticket_summary);
+        let prompts = prompt_builder::file_summary_prompt(branch, file, file_index, total_files, ticket_summary);
 
         log::info!(
             "Per-file summarize prompt for {} ({:?}) [truncated]:\n{}",
@@ -242,43 +244,6 @@ impl LlmClient for OpenAiClient {
         );
         log::debug!(
             "Final commit-message prompt [full]:\n--- SYSTEM ---\n{}\n--- USER ---\n{}",
-            prompts.system,
-            prompts.user
-        );
-
-        let req = ChatRequest {
-            model: self.model.clone(),
-            messages: vec![
-                ChatMessage {
-                    role: "system".into(),
-                    content: prompts.system,
-                },
-                ChatMessage {
-                    role: "user".into(),
-                    content: prompts.user,
-                },
-            ],
-            stream: self.stream,
-        };
-
-        let content = self.call_chat(&req)?;
-        Ok(content)
-    }
-
-    fn generate_commit_message_simple(
-        &self,
-        branch: &str,
-        diff: &str,
-        ticket_summary: Option<&str>,
-    ) -> Result<String> {
-        let prompts = prompt_builder::commit_message_simple_prompt(branch, diff, ticket_summary);
-
-        log::info!(
-            "Simple commit-message prompt [truncated]:\n{}",
-            truncate(&prompts.user, 1000)
-        );
-        log::debug!(
-            "Simple commit-message prompt [full]:\n--- SYSTEM ---\n{}\n--- USER ---\n{}",
             prompts.system,
             prompts.user
         );
