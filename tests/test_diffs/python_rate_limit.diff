@@ -1,0 +1,60 @@
+diff --git a/app/decorators.py b/app/decorators.py
+index aaa1111..bbb2222 100644
+--- a/app/decorators.py
++++ b/app/decorators.py
+@@ -1,5 +1,7 @@
+ from functools import wraps
+ from flask import request, jsonify
++from redis import Redis
++from datetime import timedelta
+ def require_auth(f):
+     @wraps(f)
+@@ -10,3 +12,25 @@ def require_auth(f):
+             return jsonify({'error': 'Unauthorized'}), 401
+         return f(*args, **kwargs)
+     return decorated
++
++redis_client = Redis(host='localhost', port=6379, db=0)
++
++def rate_limit(max_requests: int = 100, window: int = 3600):
++    """Rate limiting decorator using Redis sliding window."""
++    def decorator(f):
++        @wraps(f)
++        def decorated(*args, **kwargs):
++            client_ip = request.remote_addr
++            key = f"rate_limit:{f.__name__}:{client_ip}"
++            
++            current = redis_client.incr(key)
++            if current == 1diff --git a/app/decorators.py b/app/decorators.py
+index aaa1111..bbb2222 100644
+--- a/app/decoratorsstindex aaa1111..bbb2222 100644
+--- a/app/decoratore --- a/app/decorators.py
++++   +++ b/app/decorators.ptu@@ -1,5 +1,7 @@
+ from +  from functoolde from flask import request,or+fromcat > /Users/mikegarde/dev/github-mikegarde/commitbot/tests/test_diffs/js_debounce_hook.diff << 'EOF'
+diff --git a/src/hooks/useDebounce.js b/src/hooks/useDebounce.js
+new file mode 100644
+index 0000000..1234567
+--- /dev/null
++++ b/src/hooks/useDebounce.js
+@@ -0,0 +1,22 @@
++import { useState, useEffect } from 'react';
++
++/**
++ * Custom hook that debounces a value.
++ * @param {any} value - The value to debounce
++ * @param {number} delay - Delay in milliseconds
++ * @returns {any} The debounced value
++ */
++export function useDebounce(value, delay = 300) {
++  const [debouncedValue, setDebouncedValue] = useState(value);
++
++  useEffect(() => {
++    const timer = setTimeout(() => {
++      setDebouncedValue(value);
++    }, delay);
++
++    return () => clearTimeout(timer);
++  }, [value, delay]);
++
++  return debouncedValue;
++}

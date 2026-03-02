@@ -1,0 +1,17 @@
+diff --git a/src/parser.rs b/src/parser.rs
+index abc1234..def5678 100644
+--- a/src/parser.rs
++++ b/src/parser.rs
+@@ -45,8 +45,12 @@ impl Parser {
+     }
+     pub fn parse(&mut self, input: &str) -> Result<Ast> {
+-        let first_token = self.tokens.first().unwrap();
+-        self.parse_expression(first_token)
++        let first_token = self.tokens.first()
++            .ok_or_else(|| ParseError::EmptyInput)?;
++        
++        self.parse_expression(first_token).map_err(|e| {
++            ParseError::InvalidSyntax { line: e.line, message: e.to_string() }
++        })
+     }
+ }

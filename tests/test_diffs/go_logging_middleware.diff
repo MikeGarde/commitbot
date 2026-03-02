@@ -1,0 +1,41 @@
+diff --git a/middleware/logging.go b/middleware/logging.go
+new file mode 100644
+index 0000000..aaabbbc
+--- /dev/null
++++ b/middleware/logging.go
+@@ -0,0 +1,35 @@
++package middleware
++
++import (
++"log"
++"net/http"
++"time"
++)
++
++type responseWriter struct {
++vi-http.ResponseWriter
++vi-statusCode int
++}
++
++func (rw *responseWriter) WriteHeader(code int) {
++vi-rw.statusCode = code
++vi-rw.ResponseWriter.WriteHeader(code)
++}
++
++func LoggingMiddleware(next http.Handler) http.Handler {
++vi-return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++start := time.Now()
++vi-
++vi-rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
++vi-next.ServeHTTP(rw, r)
++vi-
++vi-duration := time.Since(start)
++vi-log.Printf(
++"%s %s %d %v",
++r.Method,
++r.RequestURI,
++rw.statusCode,
++duration,
++)
++vi-})
++}
