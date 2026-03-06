@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand, ArgAction};
 #[derive(Parser, Debug)]
 #[command(
     name = "commitbot",
-    version,
+    disable_version_flag = true,
     about = "LLM-assisted Git commit message generator"
 )]
 pub struct Cli {
@@ -60,6 +60,10 @@ pub struct Cli {
     /// Subcommand (e.g. 'pr')
     #[command(subcommand)]
     pub command: Option<Command>,
+
+    /// Print only the version number (e.g. "0.5.1"). This replaces clap's auto --version output.
+    #[arg(long, global = true, action = ArgAction::SetTrue)]
+    pub version: bool,
 }
 
 /// Subcommands, e.g. `commitbot pr develop`

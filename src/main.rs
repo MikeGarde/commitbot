@@ -661,6 +661,12 @@ fn main() -> Result<()> {
     // CLI + config
     let cli = Cli::parse();
 
+    // Handle custom --version early so we print just the version number.
+    if cli.version {
+        println!("{}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     // Initialize logging
     logging::init_logger(cli.verbose);
 
