@@ -20,18 +20,13 @@ pub fn init_logger(verbosity: u8) {
 
         let level_label = match level {
             Level::Error => "ERROR".red().bold(),
-            Level::Warn  => "WARN ".yellow().bold(),
-            Level::Info  => "INFO ".white().bold(),
+            Level::Warn => "WARN ".yellow().bold(),
+            Level::Info => "INFO ".white().bold(),
             Level::Debug => "DEBUG".bright_black(),
             Level::Trace => "TRACE".bright_black(),
         };
 
-        writeln!(
-            buf,
-            "{} {}",
-            level_label,
-            record.args()
-        )
+        writeln!(buf, "{} {}", level_label, record.args())
     });
 
     builder.init();

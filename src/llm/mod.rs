@@ -1,15 +1,18 @@
-pub mod openai;
 pub mod ollama;
-mod prompts;
+pub mod openai;
 mod prompt_builder;
+mod prompts;
 mod stream;
 
-use crate::git::{PrItem, PrSummaryMode};
 use crate::FileChange;
+use crate::git::{PrItem, PrSummaryMode};
 use anyhow::Result;
 
 /// Trait for talking to an LLM (real backend).
 pub trait LlmClient: Send + Sync {
+    /// Confirm the configured model is reachable/known by the upstream provider.
+    fn validate_model(&self) -> Result<()>;
+
     /// Generate a per-file summary based on diff + metadata.
     fn summarize_file(
         &self,

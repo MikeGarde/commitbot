@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
+use crate::git::{PrItem, PrSummaryMode};
 use crate::llm::prompts;
 use crate::{FileCategory, FileChange};
-use crate::git::{PrItem, PrSummaryMode};
 
 pub struct PromptPair {
     pub system: String,
@@ -51,9 +51,11 @@ pub fn commit_message_prompt(
     }
 
     let per_file = render_per_file_summaries(files);
+    let file_count = files.len();
     let user = format!(
-        "Branch: {branch}\n\nPer-file summaries:\n\n{per_file}",
+        "Branch: {branch}\n\nFiles Changed: {file_count}\n\nPer-file summaries:\n\n{per_file}",
         branch = branch,
+        file_count = file_count + 1,
         per_file = per_file
     );
 
@@ -114,31 +116,18 @@ pub fn pr_message_prompt(
                 }
             }
 
-            user.push_str(
-                "Pull requests contributing to this branch (oldest commits first):\n",
-            );
+            user.push_str("Pull requests contributing to this branch (oldest commits first):\n");
 
             for (num, group) in grouped {
-                let short = group[0]
-                    .commit_hash
-                    .chars()
-                    .take(7)
-                    .collect::<String>();
+                let short = group[0].commit_hash.chars().take(7).collect::<String>();
                 let title = group[0].title.trim();
                 user.push_str(&format!("\nPR #{num}: {title} [{short}]\n"));
 
                 if group.len() > 1 {
                     user.push_str("Additional commits in this PR:\n");
                     for item in group.iter().skip(1) {
-                        let sh = item
-                            .commit_hash
-                            .chars()
-                            .take(7)
-                            .collect::<String>();
-                        user.push_str(&format!(
-                            "- {sh}: {title}\n",
-                            title = item.title.trim()
-                        ));
+                        let sh = item.commit_hash.chars().take(7).collect::<String>();
+                        user.push_str(&format!("- {sh}: {title}\n", title = item.title.trim()));
                     }
                 }
             }
@@ -148,15 +137,8 @@ pub fn pr_message_prompt(
                     "\nCommits without associated PR numbers (may be small fixes or direct pushes):\n",
                 );
                 for item in no_pr {
-                    let short = item
-                        .commit_hash
-                        .chars()
-                        .take(7)
-                        .collect::<String>();
-                    user.push_str(&format!(
-                        "- {short}: {title}\n",
-                        title = item.title.trim()
-                    ));
+                    let short = item.commit_hash.chars().take(7).collect::<String>();
+                    user.push_str(&format!("- {short}: {title}\n", title = item.title.trim()));
                 }
             }
         }
@@ -168,7 +150,11 @@ pub fn pr_message_prompt(
 fn render_per_file_summaries(files: &[FileChange]) -> String {
     let total_files = files.len();
     let mut out = String::new();
-    for (idx, file) in files.iter().enumerate().filter(|(_, f)| !matches!(f.category, FileCategory::Ignored)) {
+    for (idx, file) in files
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| !matches!(f.category, FileCategory::Ignored))
+    {
         out.push_str(&format!(
             "File {file_num} of {total_files}: {path}\nCategory: {category}\nSummary:\n{summary}\n\n",
             file_num = idx + 1,

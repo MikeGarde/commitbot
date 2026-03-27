@@ -1,13 +1,14 @@
 use super::LlmClient;
+use super::prompt_builder;
 use super::stream::read_stream_to_string;
-use crate::{FileChange};
+use crate::FileChange;
 use crate::git::{PrItem, PrSummaryMode};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
+use reqwest::StatusCode;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::io::BufReader;
 use std::time::Duration;
-use super::prompt_builder;
 
 /// Minimal request/response structs for OpenAI Chat Completions API.
 #[derive(Serialize)]
@@ -94,6 +95,14 @@ impl OpenAiClient {
         }
     }
 
+    fn model_url(&self) -> String {
+        if self.api_base_url.ends_with("/v1") {
+            format!("{}/models/{}", self.api_base_url, self.model)
+        } else {
+            format!("{}/v1/models/{}", self.api_base_url, self.model)
+        }
+    }
+
     fn call_chat(&self, req: &ChatRequest) -> Result<String> {
         if req.stream {
             return self.call_chat_streaming(req);
@@ -129,8 +138,11 @@ impl OpenAiClient {
             .ok_or_else(|| anyhow!("no choices returned from OpenAI"))?;
 
         if let Some(usage) = &chat_resp.usage {
-            log::warn!("Token usage: prompt={}, completion={}, total={}",
-                usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
+            log::warn!(
+                "Token usage: prompt={}, completion={}, total={}",
+                usage.prompt_tokens,
+                usage.completion_tokens,
+                usage.total_tokens
             );
         }
 
@@ -178,15 +190,36 @@ fn parse_stream_line(line: &str) -> Result<Option<String>> {
 
     let chunk: StreamResponse =
         serde_json::from_str(data).context("failed to parse OpenAI streaming chunk")?;
-    let content = chunk
-        .choices
-        .first()
-        .and_then(|c| c.delta.content.clone());
+    let content = chunk.choices.first().and_then(|c| c.delta.content.clone());
 
     Ok(content)
 }
 
 impl LlmClient for OpenAiClient {
+    fn validate_model(&self) -> Result<()> {
+        let url = self.model_url();
+        let resp = self
+            .client
+            .get(&url)
+            .bearer_auth(&self.api_key)
+            .send()
+            .context("failed to send model validation request to OpenAI")?;
+
+        if resp.status() == StatusCode::OK {
+            return Ok(());
+        }
+
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        Err(anyhow!(
+            "OpenAI model validation failed for {:?} at {}: HTTP {} - {}",
+            self.model,
+            url,
+            status.as_u16(),
+            text
+        ))
+    }
+
     fn summarize_file(
         &self,
         branch: &str,
@@ -195,7 +228,13 @@ impl LlmClient for OpenAiClient {
         total_files: usize,
         ticket_summary: Option<&str>,
     ) -> Result<String> {
-        let prompts = prompt_builder::file_summary_prompt(branch, file, file_index, total_files, ticket_summary);
+        let prompts = prompt_builder::file_summary_prompt(
+            branch,
+            file,
+            file_index,
+            total_files,
+            ticket_summary,
+        );
 
         log::info!(
             "Per-file summarize prompt for {} ({:?}) [truncated]:\n{}",
@@ -275,8 +314,13 @@ impl LlmClient for OpenAiClient {
         items: &[PrItem],
         ticket_summary: Option<&str>,
     ) -> Result<String> {
-        let prompts =
-            prompt_builder::pr_message_prompt(base_branch, from_branch, mode, items, ticket_summary);
+        let prompts = prompt_builder::pr_message_prompt(
+            base_branch,
+            from_branch,
+            mode,
+            items,
+            ticket_summary,
+        );
 
         log::info!(
             "PR description prompt [truncated]:\n{}",
@@ -313,6 +357,45 @@ fn truncate(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
     } else {
-        format!("{}...\n[truncated {} chars]", &s[..max_len], s.len() - max_len)
+        format!(
+            "{}...\n[truncated {} chars]",
+            &s[..max_len],
+            s.len() - max_len
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builds_model_url_from_root_base() {
+        let client = OpenAiClient::new(
+            "test-key".into(),
+            "gpt-5-nano".into(),
+            "https://api.openai.com".into(),
+            false,
+        );
+
+        assert_eq!(
+            client.model_url(),
+            "https://api.openai.com/v1/models/gpt-5-nano"
+        );
+    }
+
+    #[test]
+    fn builds_model_url_from_v1_base() {
+        let client = OpenAiClient::new(
+            "test-key".into(),
+            "gpt-5-nano".into(),
+            "https://api.openai.com/v1".into(),
+            false,
+        );
+
+        assert_eq!(
+            client.model_url(),
+            "https://api.openai.com/v1/models/gpt-5-nano"
+        );
     }
 }

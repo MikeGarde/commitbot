@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use std::process::Command as GitCommand;
 
 /// How we want to summarize a PR.
@@ -26,6 +26,56 @@ pub struct PrItem {
     pub pr_number: Option<u32>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RemoteRepo {
+    path: String,
+    web_base_url: String,
+    provider: GitProvider,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GitProvider {
+    GitHub,
+    GitLab,
+    Bitbucket,
+    AzureDevOps,
+    Unknown,
+}
+
+impl RemoteRepo {
+    fn repo_id(&self) -> Option<String> {
+        if self.provider == GitProvider::AzureDevOps {
+            let segments: Vec<&str> = self.path.split('/').filter(|s| !s.is_empty()).collect();
+            if segments.len() >= 4 && segments[2] == "_git" {
+                return Some(format!("{}/{}", segments[1], segments[3]));
+            }
+        }
+
+        let segments: Vec<&str> = self.path.split('/').filter(|s| !s.is_empty()).collect();
+        if segments.len() >= 2 {
+            let owner = segments[segments.len() - 2];
+            let repo = segments[segments.len() - 1];
+            Some(format!("{owner}/{repo}"))
+        } else {
+            None
+        }
+    }
+
+    fn commit_url(&self, commit_hash: &str) -> Option<String> {
+        match self.provider {
+            GitProvider::GitHub => Some(format!("{}/commit/{}", self.web_base_url, commit_hash)),
+            GitProvider::GitLab => Some(format!("{}/-/commit/{}", self.web_base_url, commit_hash)),
+            GitProvider::Bitbucket => {
+                Some(format!("{}/commits/{}", self.web_base_url, commit_hash))
+            }
+            GitProvider::AzureDevOps => {
+                Some(format!("{}/commit/{}", self.web_base_url, commit_hash))
+            }
+            GitProvider::Unknown => None,
+        }
+    }
+}
+
 /// Run a git command and capture stdout as String.
 pub fn git_output(args: &[&str]) -> Result<String> {
     let output = GitCommand::new("git")
@@ -42,6 +92,22 @@ pub fn git_output(args: &[&str]) -> Result<String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn remote_origin_url() -> Option<String> {
+    let output = GitCommand::new("git")
+        .args(["config", "--get", "remote.origin.url"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    String::from_utf8(output.stdout)
+        .ok()
+        .map(|url| url.trim().to_string())
+        .filter(|url| !url.is_empty())
 }
 
 /// Get the current branch name.
@@ -85,9 +151,7 @@ fn find_first_pr_number(text: &str) -> Option<u32> {
                 let b = bytes[j];
                 if b.is_ascii_digit() {
                     found_digit = true;
-                    value = value
-                        .saturating_mul(10)
-                        .saturating_add((b - b'0') as u32);
+                    value = value.saturating_mul(10).saturating_add((b - b'0') as u32);
                     j += 1;
                 } else {
                     break;
@@ -195,42 +259,190 @@ pub fn stage_all() -> Result<()> {
 
 /// Try to derive a repo identifier like "owner/repo" from `git remote.origin.url`.
 pub fn detect_repo_id() -> Option<String> {
-    use std::process::Command;
+    let remote = remote_origin_url()?;
+    parse_remote_repo(&remote)?.repo_id()
+}
 
-    let output = Command::new("git")
-        .args(["config", "--get", "remote.origin.url"])
-        .output()
-        .ok()?;
+pub fn format_pr_commit_appendix(items: &[PrItem]) -> String {
+    if items.is_empty() {
+        return String::new();
+    }
 
-    if !output.status.success() {
+    let remote = remote_origin_url().and_then(|url| parse_remote_repo(&url));
+    format_pr_commit_appendix_with_remote(items, remote.as_ref())
+}
+
+fn format_pr_commit_appendix_with_remote(items: &[PrItem], remote: Option<&RemoteRepo>) -> String {
+    let mut out = String::from("Commits in this PR:\n");
+    for item in items {
+        let short = short_commit_hash(&item.commit_hash);
+        let title = item.title.trim();
+
+        match remote.and_then(|repo| repo.commit_url(&item.commit_hash)) {
+            Some(url) => {
+                out.push_str(&format!("- [`{short}`]({url}) {title}\n"));
+            }
+            None => {
+                out.push_str(&format!("- `{short}` {title}\n"));
+            }
+        }
+    }
+
+    out.trim_end().to_string()
+}
+
+fn short_commit_hash(hash: &str) -> String {
+    hash.chars().take(7).collect()
+}
+
+fn parse_remote_repo(url: &str) -> Option<RemoteRepo> {
+    let trimmed = url.trim().trim_end_matches(".git");
+    if trimmed.is_empty() {
         return None;
     }
 
-    let url = String::from_utf8(output.stdout).ok()?;
-    let trimmed = url.trim().trim_end_matches(".git");
-
-    // For SSH: git@github.com:owner/repo
-    // For HTTPS: https://github.com/owner/repo
-    let path = if let Some(idx) = trimmed.find("://") {
-        // Strip scheme and host, keep "owner/repo"
-        let rest = &trimmed[idx + 3..];
-        match rest.find('/') {
-            Some(slash) => &rest[slash + 1..],
-            None => rest,
+    if let Some(rest) = trimmed.strip_prefix("git@ssh.dev.azure.com:v3/") {
+        let parts: Vec<&str> = rest.split('/').filter(|s| !s.is_empty()).collect();
+        if parts.len() >= 3 {
+            let org = parts[0];
+            let project = parts[1];
+            let repo = parts[2];
+            return Some(RemoteRepo {
+                path: format!("{org}/{project}/_git/{repo}"),
+                web_base_url: format!("https://dev.azure.com/{org}/{project}/_git/{repo}"),
+                provider: GitProvider::AzureDevOps,
+            });
         }
-    } else if let Some(idx) = trimmed.find(':') {
-        // SSH-style: after ':' is "owner/repo"
-        &trimmed[idx + 1..]
+    }
+
+    if let Some(rest) = trimmed.strip_prefix("ssh://") {
+        return parse_remote_repo_from_authority_path(rest);
+    }
+
+    if let Some((host_part, path_part)) = trimmed.split_once("://") {
+        let _scheme = host_part;
+        return parse_remote_repo_from_authority_path(path_part);
+    }
+
+    if let Some((user_host, path)) = trimmed.split_once(':') {
+        let host = user_host.rsplit('@').next()?.to_string();
+        return build_remote_repo(host, path.trim_start_matches('/'));
+    }
+
+    None
+}
+
+fn parse_remote_repo_from_authority_path(input: &str) -> Option<RemoteRepo> {
+    let without_user = input.rsplit('@').next().unwrap_or(input);
+    let (host, path) = without_user.split_once('/')?;
+    build_remote_repo(host.to_string(), path)
+}
+
+fn build_remote_repo(host: String, path: &str) -> Option<RemoteRepo> {
+    let clean_path = path.trim_matches('/').to_string();
+    if clean_path.is_empty() {
+        return None;
+    }
+
+    let provider = if host.contains("github") {
+        GitProvider::GitHub
+    } else if host.contains("gitlab") {
+        GitProvider::GitLab
+    } else if host.contains("bitbucket") {
+        GitProvider::Bitbucket
+    } else if host.contains("azure")
+        || host == "dev.azure.com"
+        || host.ends_with(".visualstudio.com")
+    {
+        GitProvider::AzureDevOps
     } else {
-        trimmed
+        GitProvider::Unknown
     };
 
+    let web_base_url = match provider {
+        GitProvider::AzureDevOps => normalize_azure_web_base(&host, &clean_path)?,
+        _ => format!("https://{host}/{clean_path}"),
+    };
+
+    Some(RemoteRepo {
+        path: clean_path,
+        web_base_url,
+        provider,
+    })
+}
+
+fn normalize_azure_web_base(host: &str, path: &str) -> Option<String> {
     let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    if segments.len() >= 2 {
-        let owner = segments[segments.len() - 2];
-        let repo = segments[segments.len() - 1];
-        Some(format!("{}/{}", owner, repo))
-    } else {
-        None
+
+    if host == "dev.azure.com" && segments.len() >= 4 && segments[2] == "_git" {
+        return Some(format!(
+            "https://dev.azure.com/{}/{}/_git/{}",
+            segments[0], segments[1], segments[3]
+        ));
+    }
+
+    if host.ends_with(".visualstudio.com") {
+        let org = host.trim_end_matches(".visualstudio.com");
+        if segments.len() >= 3 && segments[1] == "_git" {
+            return Some(format!(
+                "https://{}.visualstudio.com/{}/_git/{}",
+                org, segments[0], segments[2]
+            ));
+        }
+    }
+
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GitProvider, PrItem, parse_remote_repo};
+
+    #[test]
+    fn parses_github_ssh_remote() {
+        let remote = parse_remote_repo("git@github.com:owner/repo.git").unwrap();
+        assert_eq!(remote.provider, GitProvider::GitHub);
+        assert_eq!(remote.repo_id().as_deref(), Some("owner/repo"));
+        assert_eq!(
+            remote.commit_url("abcdef123456").as_deref(),
+            Some("https://github.com/owner/repo/commit/abcdef123456")
+        );
+    }
+
+    #[test]
+    fn parses_gitlab_https_remote() {
+        let remote =
+            parse_remote_repo("https://gitlab.example.com/group/subgroup/repo.git").unwrap();
+        assert_eq!(remote.provider, GitProvider::GitLab);
+        assert_eq!(remote.repo_id().as_deref(), Some("subgroup/repo"));
+        assert_eq!(
+            remote.commit_url("abcdef123456").as_deref(),
+            Some("https://gitlab.example.com/group/subgroup/repo/-/commit/abcdef123456")
+        );
+    }
+
+    #[test]
+    fn parses_azure_ssh_remote() {
+        let remote = parse_remote_repo("git@ssh.dev.azure.com:v3/org/project/repo").unwrap();
+        assert_eq!(remote.provider, GitProvider::AzureDevOps);
+        assert_eq!(remote.repo_id().as_deref(), Some("project/repo"));
+        assert_eq!(
+            remote.commit_url("abcdef123456").as_deref(),
+            Some("https://dev.azure.com/org/project/_git/repo/commit/abcdef123456")
+        );
+    }
+
+    #[test]
+    fn appendix_falls_back_to_hash_only_when_no_remote() {
+        let items = vec![PrItem {
+            commit_hash: "abcdef123456".to_string(),
+            title: "Refine PR footer rendering".to_string(),
+            body: String::new(),
+            pr_number: None,
+        }];
+
+        let appendix = super::format_pr_commit_appendix_with_remote(&items, None);
+        assert!(appendix.contains("Commits in this PR:"));
+        assert!(appendix.contains("- `abcdef1` Refine PR footer rendering"));
     }
 }

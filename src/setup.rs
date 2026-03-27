@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::llm::LlmClient;
-use crate::llm::openai::OpenAiClient;
 use crate::llm::ollama::OllamaClient;
+use crate::llm::openai::OpenAiClient;
 
 /// Build the LLM client based on CLI + config.
 pub fn build_llm_client(cfg: &Config) -> Box<dyn LlmClient> {
@@ -18,7 +18,8 @@ pub fn build_llm_client(cfg: &Config) -> Box<dyn LlmClient> {
 
             log::debug!(
                 "Using OpenAiClient with model: {} (stream={})",
-                cfg.model, cfg.stream
+                cfg.model,
+                cfg.stream
             );
 
             Box::new(OpenAiClient::new(
@@ -36,14 +37,11 @@ pub fn build_llm_client(cfg: &Config) -> Box<dyn LlmClient> {
 
             log::debug!(
                 "Using OllamaClient with model: {} (stream={})",
-                cfg.model, cfg.stream
+                cfg.model,
+                cfg.stream
             );
 
-            Box::new(OllamaClient::new(
-                base_url,
-                cfg.model.clone(),
-                cfg.stream,
-            ))
+            Box::new(OllamaClient::new(base_url, cfg.model.clone(), cfg.stream))
         }
         other => panic!("Unknown provider: {}", other),
     }

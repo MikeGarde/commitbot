@@ -2,8 +2,10 @@
 
 A Rust-powered CLI that writes meaningful, structured Git commit messages using LLMs.
 
-[![Version](https://img.shields.io/github/v/release/MikeGarde/commitbot?color=brightgreen&label=release)](https://github.com/MikeGarde/commitbot/releases)
-[![Version](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](https://github.com/MikeGarde/commitbot/blob/main/LICENSE)
+[![Version](https://img.shields.io/github/v/release/MikeGarde/commitbot?color=blue&label=release)](https://github.com/MikeGarde/commitbot/releases)
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](https://github.com/MikeGarde/commitbot/blob/main/LICENSE)
+[![Downloads](https://img.shields.io/github/downloads/MikeGarde/commitbot/total.svg?color=blue)](https://GitHub.com/MikeGarde/commitbot/releases/)
+
 
 ---
 

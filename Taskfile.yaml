@@ -97,6 +97,7 @@ tasks:
       - sh devops/release.sh {{.VERSION}}
       - task: publish:dry
       - task: publish
+      - task: install
       - TAG=$(commitbot --version) && \
         cd ../homebrew-tap && \
         gh workflow run update-formula.yml -f formula=commitbot -f repo=mikegarde/commitbot -f tag=$TAG

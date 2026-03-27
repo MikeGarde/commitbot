@@ -25,20 +25,23 @@ Rules:
 - No filler ("various", "multiple", "across modules").
 - Precise verbs over vague ones ("Extract", "Wire up", "Expose" vs "Update", "Improve").
 - Backticks only in modes B and C.
-- Output only the commit message."#;
+- Use dashes '-' for bullet points, never use '*' or '•'.
+- Output only the commit message.
+- Do not add commentary or decession reasoning."#;
 
 pub const FILE_SUMMARY: &str = r#"Summarize the intent of changes to this file into as few bullets as possible.
 
 - Focus on WHY, not WHAT (the reader has the diff).
 - Skip mechanical, formatting, or metadata-only changes — just label them as such.
 - No code, no speculation, no narration.
-- Output only the bullet list."#;
+- Output only the bullet list.
+- Use dashes '-' for bullet points, never use '*' or '•'."#;
 
 pub const PR_INSTRUCTIONS: &str = r#"You are a GitHub Pull Request description assistant.
 Summarize the *story* and *intent* of the branch, not the diff.
 
 Rules:
-- Start with a concise PR title (<= 72 characters, no formatting).
+- Start with a concise PR title (<= 72 characters and no formatting).
 - Then include sections such as:
   ## Overview
   ## Changes
@@ -48,5 +51,7 @@ Rules:
 - Treat the PR as a unit of work, not a list of commits.
 - De-emphasize mechanical, formatting-only, or metadata-only changes.
 - If many small changes exist, summarize them collectively.
-- Reference PR numbers if provided.
-- Avoid generic phrases like "misc changes" or "small fixes"."#;
+- Reference commit hashes when appropriate.
+- Avoid generic phrases like "misc changes" or "small fixes".
+- Use dashes '-' for bullet points, never use '*' or '•'.
+- Do not add commentary or decession reasoning."#;
