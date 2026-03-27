@@ -17,6 +17,12 @@ tasks:
       - cargo clippy --all-targets --all-features -- -D warnings
       - cargo test --all-features
 
+  test:simple:
+    desc: "Run simple unit tests"
+    cmds:
+      - cargo clippy --all-targets --all-features -- -D warnings
+      - cargo test --test cli_basics -- --nocapture
+
   test:prompts:
     desc: "Run prompt tests"
     cmds:
@@ -93,7 +99,7 @@ tasks:
       VERSION: '{{index .MATCH 0}}'
     interactive: true
     cmds:
-      - task: test
+      - task: test:simple
       - sh devops/release.sh {{.VERSION}}
       - task: publish:dry
       - task: publish
