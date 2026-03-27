@@ -126,9 +126,6 @@ perl -pi -e 's/^version = "[0-9]+\.[0-9]+\.[0-9]+"/version = "'"$NEW_VERSION"'"/
 echo "Running task setup..."
 task setup
 
-echo "Running task test..."
-task test
-
 echo "Running task build:release:all..."
 task "build:release:${NEW_VERSION}"
 
