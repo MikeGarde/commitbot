@@ -5,7 +5,7 @@ mod llm;
 mod logging;
 mod setup;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clap::Parser;
 use config::Config;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -18,8 +18,8 @@ use std::time::Duration;
 
 use crate::cli_args::{Cli, Command};
 use crate::git::{
-    collect_pr_items, current_branch, split_diff_by_file, staged_diff_for_file, staged_files,
-    stage_all, PrSummaryMode,
+    PrSummaryMode, collect_pr_items, current_branch, format_pr_commit_appendix, split_diff_by_file,
+    stage_all, staged_diff_for_file, staged_files,
 };
 use crate::llm::LlmClient;
 
@@ -228,8 +228,7 @@ fn summarize_files_concurrently(
             for &file_idx in chunk {
                 let results = Arc::clone(&results);
                 let pb = pb.clone();
-                let file_line = file_lines
-                    .and_then(|lines| lines.get(file_idx)).cloned();
+                let file_line = file_lines.and_then(|lines| lines.get(file_idx)).cloned();
 
                 if let Some(line) = &file_line {
                     line.set_message("summarizing...");
@@ -443,18 +442,11 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     println!();
 
     if cfg.stream {
-        let _msg = llm.generate_commit_message(
-            &branch,
-            &file_changes,
-            ticket_summary.as_deref(),
-        )?;
+        let _msg =
+            llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())?;
         println!();
     } else {
-        let msg = llm.generate_commit_message(
-            &branch,
-            &file_changes,
-            ticket_summary.as_deref(),
-        )?;
+        let msg = llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())?;
         println!("{msg}");
     }
 
@@ -464,7 +456,9 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
 /// Auto mode (default): per-file LLM summaries then final commit message — no human classification.
 /// When `--diff` is supplied the combined diff is split by file; otherwise staged files are used.
 fn run_auto(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
-    let (branch, file_pairs): (String, Vec<(String, String)>) = if let Some(ref diff_arg) = cli.diff {
+    let using_external_diff = cli.diff.is_some();
+    let (branch, file_pairs): (String, Vec<(String, String)>) = if let Some(ref diff_arg) = cli.diff
+    {
         // Read the combined diff from file or stdin.
         let combined = if diff_arg == "-" {
             use std::io::Read;
@@ -517,6 +511,10 @@ fn run_auto(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
 
     println!();
     println!("Asking {}...", cfg.model);
+    if let Some(ref diff_arg) = cli.diff {
+        let diff_source = if diff_arg == "-" { "stdin" } else { diff_arg };
+        println!("Using external diff: {diff_source}");
+    }
 
     let total = file_changes.len();
     let mp = MultiProgress::new();
@@ -528,7 +526,12 @@ fn run_auto(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
             ProgressStyle::with_template("{spinner:.cyan} {prefix:.bold}: {msg}")
                 .expect("progress style template"),
         );
-        line.set_prefix(fc.path.clone());
+        let prefix = if using_external_diff {
+            format!("[diff] {}", fc.path)
+        } else {
+            fc.path.clone()
+        };
+        line.set_prefix(prefix);
         line.enable_steady_tick(Duration::from_millis(120));
         line.set_message("waiting");
         file_lines.push(line);
@@ -569,7 +572,8 @@ fn run_auto(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     println!();
 
     if cfg.stream {
-        let _msg = llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())?;
+        let _msg =
+            llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())?;
         println!();
     } else {
         let msg = llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())?;
@@ -631,28 +635,24 @@ fn run_pr(
     let ticket_summary = resolved_ticket_summary(cli);
     let _pr_message = if cfg.stream {
         println!();
-        let msg = llm.generate_pr_message(
-            base,
-            &from_branch,
-            mode,
-            &items,
-            ticket_summary.as_deref(),
-        )?;
+        let msg =
+            llm.generate_pr_message(base, &from_branch, mode, &items, ticket_summary.as_deref())?;
         println!();
         msg
     } else {
         println!();
-        let msg = llm.generate_pr_message(
-            base,
-            &from_branch,
-            mode,
-            &items,
-            ticket_summary.as_deref(),
-        )?;
+        let msg =
+            llm.generate_pr_message(base, &from_branch, mode, &items, ticket_summary.as_deref())?;
 
         println!("{msg}");
         msg
     };
+
+    let appendix = format_pr_commit_appendix(&items);
+    if !appendix.is_empty() {
+        println!();
+        println!("{appendix}");
+    }
 
     Ok(())
 }
@@ -686,14 +686,15 @@ fn main() -> Result<()> {
 
     // LLM client setup
     let boxed_client = setup::build_llm_client(&cfg);
+    boxed_client.validate_model()?;
 
     match &cli.command {
         Some(Command::Pr {
-                 base,
-                 from,
-                 pr_mode,
-                 commit_mode,
-             }) => run_pr(
+            base,
+            from,
+            pr_mode,
+            commit_mode,
+        }) => run_pr(
             &cli,
             &cfg,
             boxed_client.as_ref(),

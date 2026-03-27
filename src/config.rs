@@ -1,4 +1,4 @@
-use crate::{git, Cli};
+use crate::{Cli, git};
 use git::detect_repo_id;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -48,7 +48,9 @@ impl Config {
         let base_url = base_url.map(|s| s.trim_matches('"').to_string());
 
         if provider == "openai" && openai_api_key.is_none() {
-            panic!("OPENAI_API_KEY must be set via CLI, env var, or config file for provider=openai");
+            panic!(
+                "OPENAI_API_KEY must be set via CLI, env var, or config file for provider=openai"
+            );
         }
 
         Config {
@@ -161,7 +163,11 @@ impl<'a> ConfigResolver<'a> {
     // ---- FILE SOURCES ----
 
     fn file_string(&self, key: &str, repo: bool) -> Option<String> {
-        let cfg = if repo { &self.file_repo } else { &self.file_default };
+        let cfg = if repo {
+            &self.file_repo
+        } else {
+            &self.file_default
+        };
         match key {
             "provider" => cfg.provider.clone(),
             "model" => cfg.model.clone(),
@@ -172,7 +178,11 @@ impl<'a> ConfigResolver<'a> {
     }
 
     fn file_usize(&self, key: &str, repo: bool) -> Option<usize> {
-        let cfg = if repo { &self.file_repo } else { &self.file_default };
+        let cfg = if repo {
+            &self.file_repo
+        } else {
+            &self.file_default
+        };
         match key {
             "max_concurrent_requests" => cfg.max_concurrent_requests,
             _ => None,
@@ -180,7 +190,11 @@ impl<'a> ConfigResolver<'a> {
     }
 
     fn file_bool(&self, key: &str, repo: bool) -> Option<bool> {
-        let cfg = if repo { &self.file_repo } else { &self.file_default };
+        let cfg = if repo {
+            &self.file_repo
+        } else {
+            &self.file_default
+        };
         match key {
             "stream" => cfg.stream,
             _ => None,

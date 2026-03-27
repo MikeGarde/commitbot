@@ -1,15 +1,16 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use log;
-use musli::{Encode, Decode};
 use musli::json;
+use musli::{Decode, Encode};
+use reqwest::StatusCode;
 use reqwest::blocking::Client;
 use std::io::BufReader;
 
 use crate::FileChange;
 use crate::git::{PrItem, PrSummaryMode};
 
-use super::{prompt_builder, LlmClient};
 use super::stream::read_stream_to_string;
+use super::{LlmClient, prompt_builder};
 
 #[derive(Debug, Encode, Decode)]
 struct OllamaMessage {
@@ -26,6 +27,16 @@ struct OllamaChatResponse {
 struct OllamaStreamResponse {
     message: Option<OllamaMessage>,
     done: Option<bool>,
+}
+
+#[derive(Debug, Decode)]
+struct OllamaTagModel {
+    name: String,
+}
+
+#[derive(Debug, Decode)]
+struct OllamaTagsResponse {
+    models: Vec<OllamaTagModel>,
 }
 
 /// Synchronous Ollama client using /api/chat.
@@ -114,6 +125,9 @@ impl OllamaClient {
         Ok(parsed.message.content.trim().to_string())
     }
 
+    fn tags_url(&self) -> String {
+        format!("{}/api/tags", self.base_url)
+    }
 }
 
 fn parse_stream_line(line: &str) -> Result<Option<String>> {
@@ -124,14 +138,65 @@ fn parse_stream_line(line: &str) -> Result<Option<String>> {
         return Ok(None);
     }
 
-    let content = parsed
-        .message
-        .and_then(|m| if m.content.is_empty() { None } else { Some(m.content) });
+    let content = parsed.message.and_then(|m| {
+        if m.content.is_empty() {
+            None
+        } else {
+            Some(m.content)
+        }
+    });
 
     Ok(content)
 }
 
 impl LlmClient for OllamaClient {
+    fn validate_model(&self) -> Result<()> {
+        let url = self.tags_url();
+        let resp = self
+            .http
+            .get(&url)
+            .send()
+            .map_err(|e| anyhow!("Error calling Ollama at {url}: {e}"))?;
+
+        if resp.status() != StatusCode::OK {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            return Err(anyhow!(
+                "Ollama model validation failed at {url}: HTTP {} - {}",
+                status.as_u16(),
+                body
+            ));
+        }
+
+        let body = resp
+            .text()
+            .map_err(|e| anyhow!("Failed to read Ollama tags response from {url}: {e}"))?;
+        let parsed: OllamaTagsResponse = json::from_str(&body)
+            .map_err(|e| anyhow!("Failed to decode Ollama tags response from {url}: {e}"))?;
+
+        if parsed.models.iter().any(|model| model.name == self.model) {
+            return Ok(());
+        }
+
+        let available = parsed
+            .models
+            .iter()
+            .map(|model| model.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        Err(anyhow!(
+            "Model {:?} was not found at {}. Available models: {}",
+            self.model,
+            url,
+            if available.is_empty() {
+                "<none>"
+            } else {
+                &available
+            }
+        ))
+    }
+
     fn summarize_file(
         &self,
         branch: &str,
@@ -140,7 +205,13 @@ impl LlmClient for OllamaClient {
         total_files: usize,
         ticket_summary: Option<&str>,
     ) -> Result<String> {
-        let prompts = prompt_builder::file_summary_prompt(branch, file, file_index, total_files, ticket_summary);
+        let prompts = prompt_builder::file_summary_prompt(
+            branch,
+            file,
+            file_index,
+            total_files,
+            ticket_summary,
+        );
         self.chat(prompts.system, prompts.user, false)
     }
 
@@ -162,8 +233,43 @@ impl LlmClient for OllamaClient {
         items: &[PrItem],
         ticket_summary: Option<&str>,
     ) -> Result<String> {
-        let prompts =
-            prompt_builder::pr_message_prompt(base_branch, from_branch, mode, items, ticket_summary);
+        let prompts = prompt_builder::pr_message_prompt(
+            base_branch,
+            from_branch,
+            mode,
+            items,
+            ticket_summary,
+        );
         self.chat(prompts.system, prompts.user, self.stream)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trims_trailing_slash_in_tags_url() {
+        let client = OllamaClient::new("http://localhost:11434/", "qwen3-coder:30b", false);
+        assert_eq!(client.tags_url(), "http://localhost:11434/api/tags");
+    }
+
+    #[test]
+    fn decodes_ollama_tags_payload() {
+        let body = r#"{"models":[{"name":"qwen3-coder:30b"},{"name":"gpt-oss:20b"}]}"#;
+        let parsed: OllamaTagsResponse = json::from_str(body).expect("valid tags payload");
+
+        assert!(
+            parsed
+                .models
+                .iter()
+                .any(|model| model.name == "qwen3-coder:30b")
+        );
+        assert!(
+            !parsed
+                .models
+                .iter()
+                .any(|model| model.name == "missing:model")
+        );
     }
 }

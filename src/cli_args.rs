@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand, ArgAction};
+use clap::{ArgAction, Parser, Subcommand};
 
 /// CLI options
 #[derive(Parser, Debug)]
