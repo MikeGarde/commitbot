@@ -259,17 +259,13 @@ mod tests {
         let body = r#"{"models":[{"name":"qwen3-coder:30b"},{"name":"gpt-oss:20b"}]}"#;
         let parsed: OllamaTagsResponse = json::from_str(body).expect("valid tags payload");
 
-        assert!(
-            parsed
-                .models
-                .iter()
-                .any(|model| model.name == "qwen3-coder:30b")
-        );
-        assert!(
-            !parsed
-                .models
-                .iter()
-                .any(|model| model.name == "missing:model")
-        );
+        assert!(parsed
+            .models
+            .iter()
+            .any(|model| model.name == "qwen3-coder:30b"));
+        assert!(!parsed
+            .models
+            .iter()
+            .any(|model| model.name == "missing:model"));
     }
 }

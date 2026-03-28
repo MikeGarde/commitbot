@@ -1,4 +1,5 @@
 use crate::{Cli, git};
+use anyhow::{anyhow, Result};
 use git::detect_repo_id;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -9,11 +10,17 @@ use std::path::{Path, PathBuf};
 /// Final resolved configuration for commitbot.
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// LLM provider (openai, ollama)
     pub provider: String,
+    /// OpenAI API key for authentication
     pub openai_api_key: Option<String>,
+    /// Base URL for the LLM provider
     pub base_url: Option<String>,
+    /// Model name to use for LLM calls
     pub model: String,
+    /// Maximum concurrent requests to the LLM API
     pub max_concurrent_requests: usize,
+    /// Whether to stream responses from the LLM
     pub stream: bool,
 }
 
@@ -26,7 +33,7 @@ impl Config {
     ///   3. Per-repo table in config file (e.g. ["mikegarde/commitbot"])
     ///   4. [default] table in config file
     ///   5. Hardcoded defaults
-    pub fn from_sources(cli: &Cli) -> Self {
+    pub fn from_sources(cli: &Cli) -> Result<Self> {
         let r = ConfigResolver::new(cli);
 
         let provider = r.get_string("provider", "openai").to_lowercase();
@@ -48,19 +55,19 @@ impl Config {
         let base_url = base_url.map(|s| s.trim_matches('"').to_string());
 
         if provider == "openai" && openai_api_key.is_none() {
-            panic!(
+            return Err(anyhow!(
                 "OPENAI_API_KEY must be set via CLI, env var, or config file for provider=openai"
-            );
+            ));
         }
 
-        Config {
+        Ok(Config {
             provider,
             model,
             openai_api_key,
             base_url,
             max_concurrent_requests,
             stream,
-        }
+        })
     }
 }
 

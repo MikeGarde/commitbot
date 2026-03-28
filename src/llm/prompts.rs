@@ -27,7 +27,7 @@ Rules:
 - Backticks only in modes B and C.
 - Use dashes '-' for bullet points, never use '*' or '•'.
 - Output only the commit message.
-- Do not add commentary or decession reasoning."#;
+- Do not add commentary or decision reasoning."#;
 
 pub const FILE_SUMMARY: &str = r#"Summarize the intent of changes to this file into as few bullets as possible.
 
@@ -54,4 +54,4 @@ Rules:
 - Reference commit hashes when appropriate.
 - Avoid generic phrases like "misc changes" or "small fixes".
 - Use dashes '-' for bullet points, never use '*' or '•'.
-- Do not add commentary or decession reasoning."#;
+- Do not add commentary or decision reasoning."#;

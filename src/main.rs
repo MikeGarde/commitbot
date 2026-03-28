@@ -1,28 +1,12 @@
-mod cli_args;
-mod config;
-mod git;
-mod llm;
-mod logging;
-mod setup;
-
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use clap::Parser;
-use config::Config;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-
-use std::collections::HashSet;
-use std::io::{self, Write};
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
-
-use crate::cli_args::{Cli, Command};
-use crate::git::{
-    PrSummaryMode, collect_pr_items, current_branch, format_pr_commit_appendix, split_diff_by_file,
-    stage_all, staged_diff_for_file, staged_files,
+use commitbot::config::Config;
+use commitbot::git::{
+    collect_pr_items, current_branch, format_pr_commit_appendix, split_diff_by_file,
+    staged_diff_for_file, staged_files, PrSummaryMode,
 };
-use crate::llm::LlmClient;
-
+use commitbot::llm::LlmClient;
+use commitbot::{Cli, Command, FileCategory, FileChange};
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode},
@@ -30,40 +14,14 @@ use crossterm::{
     style::{self, Color},
     terminal::{self, Clear, ClearType},
 };
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
-/// Re-export for modules like `config` that might refer to `crate::Cli` / `crate::Command`.
-pub use cli_args::{Cli as RootCli, Command as RootCommand};
+use std::collections::HashSet;
+use std::io::{self, Read, Write};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
-/// How the user categorizes each file in interactive mode.
-#[derive(Debug, Clone, Copy, serde::Serialize)]
-pub enum FileCategory {
-    Main,        // 1
-    Supporting,  // 2
-    Consequence, // 3
-    Ignored,     // 4
-}
-
-impl FileCategory {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            FileCategory::Main => "main",
-            FileCategory::Supporting => "supporting",
-            FileCategory::Consequence => "consequence",
-            FileCategory::Ignored => "ignored",
-        }
-    }
-}
-
-/// Represents a single staged file's change and metadata.
-#[derive(Debug, Clone)]
-pub struct FileChange {
-    pub path: String,
-    pub category: FileCategory,
-    pub diff: String,
-    pub summary: Option<String>, // Filled by per-file model call (or dummy)
-}
-
-/// Ask the user a question and return a trimmed input line.
 fn prompt_input(prompt: &str) -> Result<String> {
     print!("{prompt}");
     io::stdout().flush()?;
@@ -80,7 +38,6 @@ fn resolved_ticket_summary(cli: &Cli) -> Option<String> {
     }
 }
 
-/// Helper: write a line in raw mode so we also reset the cursor to column 0.
 fn tprintln<W: Write>(out: &mut W, s: &str) -> io::Result<()> {
     write!(out, "{}\r\n", s)
 }
@@ -100,11 +57,13 @@ fn dimmed(text: &str) -> String {
     format!("\x1b[2m{text}\x1b[0m")
 }
 
-/// Arrow-key UI for choosing a FileCategory (no diff preview).
 fn categorize_file_interactive(idx: usize, total: usize, path: &str) -> Result<FileCategory> {
     use FileCategory::*;
 
     let mut stdout = io::stdout();
+    std::io::stderr()
+        .flush()
+        .map_err(|e| anyhow!("failed to flush stderr: {e}"))?;
     terminal::enable_raw_mode().map_err(|e| anyhow!("failed to enable raw mode: {e}"))?;
 
     let res = (|| -> Result<FileCategory> {
@@ -148,7 +107,6 @@ fn categorize_file_interactive(idx: usize, total: usize, path: &str) -> Result<F
             let ev = event::read()?;
             if let Event::Key(key) = ev {
                 match key.code {
-                    // Arrow navigation
                     KeyCode::Up => {
                         if selected_index == 0 {
                             selected_index = labels.len() - 1;
@@ -159,14 +117,10 @@ fn categorize_file_interactive(idx: usize, total: usize, path: &str) -> Result<F
                     KeyCode::Down => {
                         selected_index = (selected_index + 1) % labels.len();
                     }
-
-                    // Numeric shortcuts
                     KeyCode::Char('1') => return Ok(Main),
                     KeyCode::Char('2') => return Ok(Supporting),
                     KeyCode::Char('3') => return Ok(Consequence),
                     KeyCode::Char('4') => return Ok(Ignored),
-
-                    // Enter = accept current selection
                     KeyCode::Enter => {
                         let cat = match selected_index {
                             0 => Main,
@@ -177,12 +131,9 @@ fn categorize_file_interactive(idx: usize, total: usize, path: &str) -> Result<F
                         };
                         return Ok(cat);
                     }
-
-                    // Esc = abort
                     KeyCode::Esc => {
                         return Err(anyhow!("aborted by user"));
                     }
-
                     _ => {}
                 }
             }
@@ -203,7 +154,6 @@ struct SummarizeContext<'a> {
     max_concurrent_requests: usize,
 }
 
-/// Run per-file summaries concurrently, honoring `max_concurrent_requests`.
 fn summarize_files_concurrently(
     file_changes: &mut [FileChange],
     indices: &[usize],
@@ -216,13 +166,10 @@ fn summarize_files_concurrently(
     }
 
     let max_concurrent = ctx.max_concurrent_requests.max(1);
+    let total_files = file_changes.len();
 
-    // Store (file_index, result) for all summarizations.
     let results: SummarizeResults = Arc::new(Mutex::new(Vec::new()));
 
-    // Process in chunks of `max_concurrent` so we never have more than that many
-    // in-flight LLM calls at once.
-    let total_files = file_changes.len();
     for chunk in indices.chunks(max_concurrent) {
         thread::scope(|scope| {
             for &file_idx in chunk {
@@ -234,7 +181,6 @@ fn summarize_files_concurrently(
                     line.set_message("summarizing...");
                 }
 
-                // Clone just the data we need from this file so we don't share &mut across threads.
                 let path = file_changes[file_idx].path.clone();
                 let diff = file_changes[file_idx].diff.clone();
                 let category = file_changes[file_idx].category;
@@ -260,7 +206,6 @@ fn summarize_files_concurrently(
                         Ok(summary)
                     })();
 
-                    // Always advance the progress bar for this file, even if it errors.
                     pb.inc(1);
 
                     if let Some(line) = &file_line {
@@ -282,7 +227,6 @@ fn summarize_files_concurrently(
         });
     }
 
-    // Unwrap Arc and Mutex and apply results back onto file_changes.
     let results = Arc::try_unwrap(results)
         .expect("results Arc still has multiple owners")
         .into_inner()
@@ -310,13 +254,9 @@ fn summarize_files_concurrently(
     Ok(())
 }
 
-/// Interactive mode: classify files, then do all LLM calls afterward (batched with concurrency).
-/// Supports --diff for prompt testing (splits combined diff into per-file entries).
 fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
-    // Build (branch, file_pairs) — works with both staged git and --diff.
     let (branch, file_pairs) = if let Some(ref diff_arg) = cli.diff {
         let combined = if diff_arg == "-" {
-            use std::io::Read;
             let mut buf = String::new();
             io::stdin().read_to_string(&mut buf)?;
             buf
@@ -332,7 +272,11 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
         if per_file.is_empty() {
             per_file = vec![("(diff)".to_string(), combined)];
         }
-        (cli.branch.clone(), per_file)
+        let branch = cli
+            .branch
+            .clone()
+            .unwrap_or_else(|| current_branch().unwrap_or_else(|_| "unknown-branch".to_string()));
+        (branch, per_file)
     } else {
         let branch = current_branch()?;
         let files = staged_files()?;
@@ -358,7 +302,6 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
 
     let mut file_changes: Vec<FileChange> = Vec::new();
 
-    // Phase 1: Interactive classification
     let total_files = file_pairs.len();
     for (idx, (path, diff)) in file_pairs.into_iter().enumerate() {
         let category = categorize_file_interactive(idx, total_files, &path)?;
@@ -370,7 +313,6 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
         });
     }
 
-    // Phase 2: LLM calls
     println!();
     println!("Asking {}...", cfg.model);
 
@@ -400,7 +342,6 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
             .unwrap_or_else(|_| ProgressStyle::default_bar()),
     );
 
-    // Pre-increment for ignored files and collect indices that actually need summarization.
     let mut indices_to_summarize = Vec::new();
     let mut ignored_count = 0usize;
 
@@ -438,7 +379,6 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     pb.inc(1);
     pb.finish_with_message("Done");
 
-    // Final commit message
     println!();
 
     if cfg.stream {
@@ -453,52 +393,49 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     Ok(())
 }
 
-/// Auto mode (default): per-file LLM summaries then final commit message — no human classification.
-/// When `--diff` is supplied the combined diff is split by file; otherwise staged files are used.
 fn run_auto(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     let using_external_diff = cli.diff.is_some();
-    let (branch, file_pairs): (String, Vec<(String, String)>) = if let Some(ref diff_arg) = cli.diff
-    {
-        // Read the combined diff from file or stdin.
-        let combined = if diff_arg == "-" {
-            use std::io::Read;
-            let mut buf = String::new();
-            io::stdin().read_to_string(&mut buf)?;
-            buf
+    let (branch, file_pairs): (String, Vec<(String, String)>) =
+        if let Some(ref diff_arg) = cli.diff {
+            let combined = if diff_arg == "-" {
+                let mut buf = String::new();
+                io::stdin().read_to_string(&mut buf)?;
+                buf
+            } else {
+                std::fs::read_to_string(diff_arg)
+                    .map_err(|e| anyhow!("Failed to read diff file '{}': {}", diff_arg, e))?
+            };
+
+            if combined.trim().is_empty() {
+                println!("No diff content found.");
+                return Ok(());
+            }
+
+            let mut per_file = split_diff_by_file(&combined);
+            if per_file.is_empty() {
+                per_file = vec![("(diff)".to_string(), combined)];
+            }
+            let branch = cli.branch.clone().unwrap_or_else(|| {
+                current_branch().unwrap_or_else(|_| "unknown-branch".to_string())
+            });
+            (branch, per_file)
         } else {
-            std::fs::read_to_string(diff_arg)
-                .map_err(|e| anyhow!("Failed to read diff file '{}': {}", diff_arg, e))?
+            let branch = current_branch()?;
+            let files = staged_files()?;
+            if files.is_empty() {
+                println!("No staged changes found.");
+                return Ok(());
+            }
+            let mut pairs = Vec::new();
+            for path in files {
+                let diff = staged_diff_for_file(&path)?;
+                pairs.push((path, diff));
+            }
+            (branch, pairs)
         };
-
-        if combined.trim().is_empty() {
-            println!("No diff content found.");
-            return Ok(());
-        }
-
-        let mut per_file = split_diff_by_file(&combined);
-        if per_file.is_empty() {
-            per_file = vec![("(diff)".to_string(), combined)];
-        }
-        (cli.branch.clone(), per_file)
-    } else {
-        // Normal git mode: get per-file staged diffs.
-        let branch = current_branch()?;
-        let files = staged_files()?;
-        if files.is_empty() {
-            println!("No staged changes found.");
-            return Ok(());
-        }
-        let mut pairs = Vec::new();
-        for path in files {
-            let diff = staged_diff_for_file(&path)?;
-            pairs.push((path, diff));
-        }
-        (branch, pairs)
-    };
 
     let ticket_summary = resolved_ticket_summary(cli);
 
-    // Build FileChange list — all files are categorized as Main automatically.
     let mut file_changes: Vec<FileChange> = file_pairs
         .into_iter()
         .map(|(path, diff)| FileChange {
@@ -583,7 +520,6 @@ fn run_auto(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     Ok(())
 }
 
-/// PR mode: summarize commits/PRs between base..from into a PR description.
 fn run_pr(
     cli: &Cli,
     cfg: &Config,
@@ -604,13 +540,11 @@ fn run_pr(
         return Ok(());
     }
 
-    // Determine mode
     let mode = if pr_flag {
         PrSummaryMode::ByPrs
     } else if commit_flag {
         PrSummaryMode::ByCommits
     } else {
-        // Auto-detect: if multiple distinct PR numbers are present, use PR mode.
         let mut distinct_prs: HashSet<u32> = HashSet::new();
         for item in &items {
             if let Some(n) = item.pr_number {
@@ -658,7 +592,6 @@ fn run_pr(
 }
 
 fn main() -> Result<()> {
-    // CLI + config
     let cli = Cli::parse();
 
     // Handle custom --version early so we print just the version number.
@@ -667,8 +600,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Initialize logging
-    logging::init_logger(cli.verbose);
+    commitbot::logging::init_logger(cli.verbose);
 
     if cli.diff.is_some() && matches!(&cli.command, Some(Command::Pr { .. })) {
         return Err(anyhow!(
@@ -677,15 +609,13 @@ fn main() -> Result<()> {
         ));
     }
 
-    let cfg = Config::from_sources(&cli);
+    let cfg = Config::from_sources(&cli)?;
 
-    // Pre-Work Items
     if cli.stage {
-        stage_all()?;
+        commitbot::git::stage_all()?;
     }
 
-    // LLM client setup
-    let boxed_client = setup::build_llm_client(&cfg);
+    let boxed_client = commitbot::setup::build_llm_client(&cfg)?;
     boxed_client.validate_model()?;
 
     match &cli.command {

@@ -1,14 +1,17 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use std::process::Command as GitCommand;
 
 /// How we want to summarize a PR.
 #[derive(Debug, Clone, Copy)]
 pub enum PrSummaryMode {
+    /// Summarize by commits
     ByCommits,
+    /// Summarize by PR numbers
     ByPrs,
 }
 
 impl PrSummaryMode {
+    /// Convert the mode to a string representation.
     pub fn as_str(&self) -> &'static str {
         match self {
             PrSummaryMode::ByCommits => "commits",
@@ -20,21 +23,25 @@ impl PrSummaryMode {
 /// A commit involved in the PR range, plus any detected PR number.
 #[derive(Debug, Clone)]
 pub struct PrItem {
+    /// Git commit hash
     pub commit_hash: String,
+    /// Commit title/message
     pub title: String,
+    /// Commit body/description
     pub body: String,
+    /// Detected PR number from commit message
     pub pr_number: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct RemoteRepo {
+pub struct RemoteRepo {
     path: String,
     web_base_url: String,
-    provider: GitProvider,
+    pub provider: GitProvider,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum GitProvider {
+pub enum GitProvider {
     GitHub,
     GitLab,
     Bitbucket,
@@ -43,7 +50,7 @@ enum GitProvider {
 }
 
 impl RemoteRepo {
-    fn repo_id(&self) -> Option<String> {
+    pub fn repo_id(&self) -> Option<String> {
         if self.provider == GitProvider::AzureDevOps {
             let segments: Vec<&str> = self.path.split('/').filter(|s| !s.is_empty()).collect();
             if segments.len() >= 4 && segments[2] == "_git" {
@@ -61,7 +68,7 @@ impl RemoteRepo {
         }
     }
 
-    fn commit_url(&self, commit_hash: &str) -> Option<String> {
+    pub fn commit_url(&self, commit_hash: &str) -> Option<String> {
         match self.provider {
             GitProvider::GitHub => Some(format!("{}/commit/{}", self.web_base_url, commit_hash)),
             GitProvider::GitLab => Some(format!("{}/-/commit/{}", self.web_base_url, commit_hash)),
@@ -136,7 +143,7 @@ pub fn staged_diff_for_file(path: &str) -> Result<String> {
 }
 
 /// Find the first PR number in a string, based on '#123' pattern.
-fn find_first_pr_number(text: &str) -> Option<u32> {
+pub fn find_first_pr_number(text: &str) -> Option<u32> {
     let bytes = text.as_bytes();
     let len = bytes.len();
     let mut i = 0;
@@ -272,7 +279,10 @@ pub fn format_pr_commit_appendix(items: &[PrItem]) -> String {
     format_pr_commit_appendix_with_remote(items, remote.as_ref())
 }
 
-fn format_pr_commit_appendix_with_remote(items: &[PrItem], remote: Option<&RemoteRepo>) -> String {
+pub fn format_pr_commit_appendix_with_remote(
+    items: &[PrItem],
+    remote: Option<&RemoteRepo>,
+) -> String {
     let mut out = String::from("Commits in this PR:\n");
     for item in items {
         let short = short_commit_hash(&item.commit_hash);
@@ -291,11 +301,11 @@ fn format_pr_commit_appendix_with_remote(items: &[PrItem], remote: Option<&Remot
     out.trim_end().to_string()
 }
 
-fn short_commit_hash(hash: &str) -> String {
+pub fn short_commit_hash(hash: &str) -> String {
     hash.chars().take(7).collect()
 }
 
-fn parse_remote_repo(url: &str) -> Option<RemoteRepo> {
+pub fn parse_remote_repo(url: &str) -> Option<RemoteRepo> {
     let trimmed = url.trim().trim_end_matches(".git");
     if trimmed.is_empty() {
         return None;
@@ -392,57 +402,4 @@ fn normalize_azure_web_base(host: &str, path: &str) -> Option<String> {
     }
 
     None
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{GitProvider, PrItem, parse_remote_repo};
-
-    #[test]
-    fn parses_github_ssh_remote() {
-        let remote = parse_remote_repo("git@github.com:owner/repo.git").unwrap();
-        assert_eq!(remote.provider, GitProvider::GitHub);
-        assert_eq!(remote.repo_id().as_deref(), Some("owner/repo"));
-        assert_eq!(
-            remote.commit_url("abcdef123456").as_deref(),
-            Some("https://github.com/owner/repo/commit/abcdef123456")
-        );
-    }
-
-    #[test]
-    fn parses_gitlab_https_remote() {
-        let remote =
-            parse_remote_repo("https://gitlab.example.com/group/subgroup/repo.git").unwrap();
-        assert_eq!(remote.provider, GitProvider::GitLab);
-        assert_eq!(remote.repo_id().as_deref(), Some("subgroup/repo"));
-        assert_eq!(
-            remote.commit_url("abcdef123456").as_deref(),
-            Some("https://gitlab.example.com/group/subgroup/repo/-/commit/abcdef123456")
-        );
-    }
-
-    #[test]
-    fn parses_azure_ssh_remote() {
-        let remote = parse_remote_repo("git@ssh.dev.azure.com:v3/org/project/repo").unwrap();
-        assert_eq!(remote.provider, GitProvider::AzureDevOps);
-        assert_eq!(remote.repo_id().as_deref(), Some("project/repo"));
-        assert_eq!(
-            remote.commit_url("abcdef123456").as_deref(),
-            Some("https://dev.azure.com/org/project/_git/repo/commit/abcdef123456")
-        );
-    }
-
-    #[test]
-    fn appendix_falls_back_to_hash_only_when_no_remote() {
-        let items = vec![PrItem {
-            commit_hash: "abcdef123456".to_string(),
-            title: "Refine PR footer rendering".to_string(),
-            body: String::new(),
-            pr_number: None,
-        }];
-
-        let appendix = super::format_pr_commit_appendix_with_remote(&items, None);
-        assert!(appendix.contains("Commits in this PR:"));
-        assert!(appendix.contains("- `abcdef1` Refine PR footer rendering"));
-    }
 }

@@ -42,8 +42,9 @@ pub struct Cli {
     pub diff: Option<String>,
 
     /// Branch name to use in the commit message context (used with --diff).
-    #[arg(long, global = true, default_value = "feature/test-branch")]
-    pub branch: String,
+    /// If not specified with --diff, defaults to the current branch.
+    #[arg(long, global = true)]
+    pub branch: Option<String>,
 
     /// Disable streaming responses (streaming is on by default)
     #[arg(long, global = true)]
@@ -70,6 +71,10 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Generate a Pull Request description by summarizing commit or PR messages
+    ///
+    /// This command analyzes a commit range and generates a PR summary.
+    /// Example:
+    ///   commitbot pr --base main --from feature-branch
     Pr {
         /// Base branch to compare against (e.g. main or develop)
         base: String,
@@ -87,6 +92,9 @@ pub enum Command {
     },
 
     /// Freeform summary provided at the end of the command.
+    ///
+    /// Example:
+    ///   commitbot summary "fix: correct typo in documentation"
     #[command(external_subcommand)]
     Summary(Vec<String>),
 }

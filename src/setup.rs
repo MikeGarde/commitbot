@@ -1,16 +1,17 @@
+use anyhow::{anyhow, Result};
 use crate::config::Config;
 use crate::llm::LlmClient;
 use crate::llm::ollama::OllamaClient;
 use crate::llm::openai::OpenAiClient;
 
 /// Build the LLM client based on CLI + config.
-pub fn build_llm_client(cfg: &Config) -> Box<dyn LlmClient> {
+pub fn build_llm_client(cfg: &Config) -> Result<Box<dyn LlmClient>> {
     match cfg.provider.as_str() {
         "openai" => {
             let key = cfg
                 .openai_api_key
                 .clone()
-                .expect("OPENAI_API_KEY must be set for provider=openai");
+                .ok_or_else(|| anyhow!("OPENAI_API_KEY must be set for provider=openai"))?;
             let base_url = cfg
                 .base_url
                 .clone()
@@ -22,12 +23,12 @@ pub fn build_llm_client(cfg: &Config) -> Box<dyn LlmClient> {
                 cfg.stream
             );
 
-            Box::new(OpenAiClient::new(
+            Ok(Box::new(OpenAiClient::new(
                 key,
                 cfg.model.clone(),
                 base_url,
                 cfg.stream,
-            ))
+            )))
         }
         "ollama" => {
             let base_url = cfg
@@ -41,8 +42,12 @@ pub fn build_llm_client(cfg: &Config) -> Box<dyn LlmClient> {
                 cfg.stream
             );
 
-            Box::new(OllamaClient::new(base_url, cfg.model.clone(), cfg.stream))
+            Ok(Box::new(OllamaClient::new(
+                base_url,
+                cfg.model.clone(),
+                cfg.stream,
+            )))
         }
-        other => panic!("Unknown provider: {}", other),
+        other => Err(anyhow!("Unknown provider: {}", other)),
     }
 }

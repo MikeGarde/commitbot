@@ -21,12 +21,12 @@ tasks:
     desc: "Run simple unit tests"
     cmds:
       - cargo clippy --all-targets --all-features -- -D warnings
-      - cargo test --test cli_basics -- --nocapture
+      - cargo test -- --nocapture
 
   test:prompts:
     desc: "Run prompt tests"
     cmds:
-      - cargo test --test prompt_live -- --nocapture
+      - cargo test --test prompt_live -- --ignored --nocapture
 
   run:simple:
     desc: "Run commitbot in simple mode (no model, debug) using cargo run"
