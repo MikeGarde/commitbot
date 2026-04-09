@@ -29,7 +29,7 @@ tasks:
       - cargo test --test prompt_live -- --ignored --nocapture
 
   run:simple:
-    desc: "Run commitbot in simple mode (no model, debug) using cargo run"
+    desc: "Run commitbot in simple mode (no model, info verbosity) using cargo run"
     cmds:
       - cargo run -- -v
 
