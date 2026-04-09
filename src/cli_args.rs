@@ -42,7 +42,7 @@ pub struct Cli {
     pub diff: Option<String>,
 
     /// Branch name to use in the commit message context (used with --diff).
-    /// If not specified with --diff, defaults to the current branch.
+    /// If not specified when using --diff, defaults to the current branch.
     #[arg(long, global = true)]
     pub branch: Option<String>,
 
