@@ -5,6 +5,7 @@ use musli::{Decode, Encode};
 use reqwest::StatusCode;
 use reqwest::blocking::Client;
 use std::io::BufReader;
+use std::sync::Mutex;
 
 use crate::FileChange;
 use crate::git::{PrItem, PrSummaryMode};
@@ -30,6 +31,13 @@ struct OllamaStreamResponse {
 }
 
 #[derive(Debug, Decode)]
+struct OllamaUsage {
+    prompt_tokens: Option<u32>,
+    completion_tokens: Option<u32>,
+    total_tokens: Option<u32>,
+}
+
+#[derive(Debug, Decode)]
 struct OllamaTagModel {
     name: String,
 }
@@ -45,6 +53,14 @@ pub struct OllamaClient {
     base_url: String,
     model: String,
     stream: bool,
+    usage: Mutex<TokenUsage>,
+}
+
+#[derive(Default)]
+struct TokenUsage {
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    total_tokens: u64,
 }
 
 impl OllamaClient {
@@ -57,6 +73,7 @@ impl OllamaClient {
             base_url: base_url.into().trim_end_matches('/').to_string(),
             model: model.into(),
             stream,
+            usage: Mutex::new(TokenUsage::default()),
         }
     }
 
@@ -119,10 +136,31 @@ impl OllamaClient {
 
         log::trace!("Ollama raw JSON response: {resp_text}");
 
-        let parsed: OllamaChatResponse =
-            json::from_str(&resp_text).map_err(|e| anyhow!("Failed to decode Ollama JSON: {e}"))?;
+        #[derive(Debug, Decode)]
+        struct OllamaChatWrapper {
+            message: OllamaMessage,
+            usage: Option<OllamaUsage>,
+        }
 
-        Ok(parsed.message.content.trim().to_string())
+        // First try decoding into the wrapper. If that fails fall back to the
+        // older shape without usage.
+        match json::from_str::<OllamaChatWrapper>(&resp_text) {
+            Ok(parsed) => {
+                if let Some(usage) = parsed.usage {
+                    let mut u = self.usage.lock().expect("usage mutex poisoned");
+                    u.prompt_tokens += usage.prompt_tokens.unwrap_or(0) as u64;
+                    u.completion_tokens += usage.completion_tokens.unwrap_or(0) as u64;
+                    u.total_tokens += usage.total_tokens.unwrap_or(0) as u64;
+                }
+                Ok(parsed.message.content.trim().to_string())
+            }
+            Err(_) => {
+                // Fallback to the simple response shape.
+                let parsed: OllamaChatResponse = json::from_str(&resp_text)
+                    .map_err(|e| anyhow!("Failed to decode Ollama JSON: {e}"))?;
+                Ok(parsed.message.content.trim().to_string())
+            }
+        }
     }
 
     fn tags_url(&self) -> String {
@@ -222,7 +260,9 @@ impl LlmClient for OllamaClient {
         ticket_summary: Option<&str>,
     ) -> Result<String> {
         let prompts = prompt_builder::commit_message_prompt(branch, files, ticket_summary);
-        self.chat(prompts.system, prompts.user, self.stream)
+        let content = self.chat(prompts.system, prompts.user, self.stream)?;
+        self.log_and_reset_usage();
+        Ok(content)
     }
 
     fn generate_pr_message(
@@ -240,7 +280,24 @@ impl LlmClient for OllamaClient {
             items,
             ticket_summary,
         );
-        self.chat(prompts.system, prompts.user, self.stream)
+        let content = self.chat(prompts.system, prompts.user, self.stream)?;
+        self.log_and_reset_usage();
+        Ok(content)
+    }
+}
+
+impl OllamaClient {
+    fn log_and_reset_usage(&self) {
+        let mut u = self.usage.lock().expect("usage mutex poisoned");
+        if u.total_tokens > 0 {
+            log::warn!(
+                "Token usage (aggregate): prompt={}, completion={}, total={}",
+                u.prompt_tokens,
+                u.completion_tokens,
+                u.total_tokens
+            );
+            *u = TokenUsage::default();
+        }
     }
 }
 

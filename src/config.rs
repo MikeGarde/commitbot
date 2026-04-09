@@ -8,11 +8,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Final resolved configuration for commitbot.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, commitbot_macros::SensitiveFields)]
 pub struct Config {
     /// LLM provider (openai, ollama)
     pub provider: String,
     /// OpenAI API key for authentication
+    #[sensitive]
     pub openai_api_key: Option<String>,
     /// Base URL for the LLM provider
     pub base_url: Option<String>,
@@ -253,22 +254,50 @@ impl<'a> ConfigResolver<'a> {
     }
 
     fn log_decision<T: std::fmt::Debug>(&self, key: &str, value: &T, src: ValueSource) {
+        // Redact sensitive keys (API keys, tokens, secrets) when printing
+        // so verbose/debug logs don't leak credentials. For option-like
+        // values we print <set>/<unset>, otherwise we print <redacted>.
+        let printable = if self.is_sensitive_key(key) {
+            // Try to detect Option<T> formatted output ("Some(...)" / "None").
+            let debug_str = format!("{:?}", value);
+            if debug_str == "None" {
+                "<unset>".to_string()
+            } else if debug_str.starts_with("Some(") {
+                "<set>".to_string()
+            } else {
+                "<redacted>".to_string()
+            }
+        } else {
+            format!("{:?}", value)
+        };
+
         if let Some(env_key) = self.env_key_for(key) {
             log::debug!(
-                "Config: {} = {:?} (source={}, env={})",
+                "Config: {} = {} (source={}, env={})",
                 key,
-                value,
+                printable,
                 source_label(src),
                 env_key
             );
         } else {
             log::debug!(
-                "Config: {} = {:?} (source={})",
+                "Config: {} = {} (source={})",
                 key,
-                value,
+                printable,
                 source_label(src)
             );
         }
+    }
+
+    // Treat a small set of keys as sensitive so logs redact them.
+    // Add other names here if you later introduce more secrets.
+    // Currently only the OpenAI API key is treated as sensitive. We keep the
+    // check centralized here so it can later be expanded. The field in the
+    // structs is annotated with a doc comment to indicate sensitivity.
+    fn is_sensitive_key(&self, key: &str) -> bool {
+        // Use the generated list from the Config struct (proc-macro)
+        // to determine which fields are sensitive.
+        Config::sensitive_field_names().contains(&key)
     }
 
     fn log_decision_secret_opt_string(&self, key: &str, present: bool, src: ValueSource) {

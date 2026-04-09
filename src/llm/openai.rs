@@ -9,6 +9,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::io::BufReader;
 use std::time::Duration;
+use std::sync::Mutex;
 
 /// Minimal request/response structs for OpenAI Chat Completions API.
 #[derive(Serialize)]
@@ -69,6 +70,14 @@ pub struct OpenAiClient {
     model: String,
     api_base_url: String,
     stream: bool,
+    usage: Mutex<TokenUsage>,
+}
+
+#[derive(Default)]
+struct TokenUsage {
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    total_tokens: u64,
 }
 
 impl OpenAiClient {
@@ -84,6 +93,7 @@ impl OpenAiClient {
             model,
             api_base_url: api_base_url.trim_end_matches('/').to_string(),
             stream,
+            usage: Mutex::new(TokenUsage::default()),
         }
     }
 
@@ -138,12 +148,10 @@ impl OpenAiClient {
             .ok_or_else(|| anyhow!("no choices returned from OpenAI"))?;
 
         if let Some(usage) = &chat_resp.usage {
-            log::warn!(
-                "Token usage: prompt={}, completion={}, total={}",
-                usage.prompt_tokens,
-                usage.completion_tokens,
-                usage.total_tokens
-            );
+            let mut u = self.usage.lock().expect("usage mutex poisoned");
+            u.prompt_tokens += usage.prompt_tokens as u64;
+            u.completion_tokens += usage.completion_tokens as u64;
+            u.total_tokens += usage.total_tokens as u64;
         }
 
         Ok(content)
@@ -236,13 +244,13 @@ impl LlmClient for OpenAiClient {
             ticket_summary,
         );
 
-        log::info!(
+        log::debug!(
             "Per-file summarize prompt for {} ({:?}) [truncated]:\n{}",
             file.path,
             file.category,
             truncate(&prompts.user, 1000)
         );
-        log::debug!(
+        log::trace!(
             "Per-file summarize prompt for {} ({:?}) [full]:\n--- SYSTEM ---\n{}\n--- USER ---\n{}",
             file.path,
             file.category,
@@ -303,6 +311,7 @@ impl LlmClient for OpenAiClient {
         };
 
         let content = self.call_chat(&req)?;
+        self.log_and_reset_usage();
         Ok(content)
     }
 
@@ -348,7 +357,25 @@ impl LlmClient for OpenAiClient {
         };
 
         let content = self.call_chat(&req)?;
+        // Final PR message generation — report aggregated usage once.
+        self.log_and_reset_usage();
         Ok(content)
+    }
+}
+
+impl OpenAiClient {
+    fn log_and_reset_usage(&self) {
+        let mut u = self.usage.lock().expect("usage mutex poisoned");
+        if u.total_tokens > 0 {
+            println!();
+            log::warn!(
+                "Token usage: prompt={}, completion={}, total={}",
+                u.prompt_tokens,
+                u.completion_tokens,
+                u.total_tokens
+            );
+            *u = TokenUsage::default();
+        }
     }
 }
 
