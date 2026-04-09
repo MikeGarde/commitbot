@@ -332,6 +332,7 @@ fn test_list_available_fixtures() {
 
 #[test]
 #[cfg_attr(test, doc = "example")]
+#[ignore = "requires live LLM access"]
 fn live_test_all_languages() {
     let mut total_passed = 0;
     let mut total_failed = 0;
@@ -393,6 +394,7 @@ fn live_test_all_languages() {
 
 #[test]
 #[cfg_attr(test, doc = "example")]
+#[ignore = "requires live LLM access"]
 fn live_test_single_rust() {
     let test = &all_test_cases()[0]; // Rust Auth Feature
 
@@ -418,6 +420,7 @@ fn live_test_single_rust() {
 
 #[test]
 #[cfg_attr(test, doc = "example")]
+#[ignore = "requires live LLM access"]
 fn live_test_word_count_distribution() {
     let mut word_counts = Vec::new();
 
@@ -452,6 +455,7 @@ fn live_test_word_count_distribution() {
 
 #[test]
 #[cfg_attr(test, doc = "example")]
+#[ignore = "requires live LLM access"]
 fn live_test_keyword_hit_rate() {
     let mut total_expected = 0;
     let mut total_found = 0;
