@@ -29,9 +29,9 @@ tasks:
       - cargo test --test prompt_live -- --ignored --nocapture
 
   run:simple:
-    desc: "Run commitbot in simple mode (no model, debug) using cargo run"
+    desc: "Run commitbot in simple mode (no model, info verbosity) using cargo run"
     cmds:
-      - cargo run -- -vv
+      - cargo run -- -v
 
   run:ask:
     desc: "Run commitbot in interactive ask mode (no model, debug)"
@@ -53,7 +53,15 @@ tasks:
   install:
     desc: "Install commitbot binary locally via cargo install --path ."
     cmds:
+      - brew uninstall mikegarde/tap/commitbot || true
       - cargo install --path . --force
+
+  install:brew:
+    desc: "Install commitbot via Homebrew (macOS)"
+    cmds:
+      - cargo uninstall commitbot || true
+      - brew uninstall mikegarde/tap/commitbot || true
+      - brew install mikegarde/tap/commitbot
 
   build:release:
     desc: "Build optimized release binary for the host"

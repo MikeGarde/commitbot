@@ -382,12 +382,19 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     println!();
 
     if cfg.stream {
-        let _msg =
-            llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())?;
-        println!();
+        let _msg = llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())?;
     } else {
         let msg = llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())?;
-        println!("{msg}");
+        if msg.ends_with('\n') {
+            print!("{msg}");
+        } else {
+            println!("{msg}");
+        }
+    }
+
+    println!();
+    if let Some((p, c, t)) = llm.take_and_reset_usage() {
+        println!("Token usage: prompt={}, completion={}, total={}", p, c, t);
     }
 
     Ok(())
@@ -509,12 +516,19 @@ fn run_auto(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     println!();
 
     if cfg.stream {
-        let _msg =
-            llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())?;
-        println!();
+        let _msg = llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())?;
     } else {
         let msg = llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())?;
-        println!("{msg}");
+        if msg.ends_with('\n') {
+            print!("{msg}");
+        } else {
+            println!("{msg}");
+        }
+    }
+
+    println!();
+    if let Some((p, c, t)) = llm.take_and_reset_usage() {
+        println!("Token usage: prompt={}, completion={}, total={}", p, c, t);
     }
 
     Ok(())
@@ -573,12 +587,16 @@ fn run_pr(
             llm.generate_pr_message(base, &from_branch, mode, &items, ticket_summary.as_deref())?;
         println!();
         msg
-    } else {
+        } else {
         println!();
         let msg =
             llm.generate_pr_message(base, &from_branch, mode, &items, ticket_summary.as_deref())?;
 
-        println!("{msg}");
+        if msg.ends_with('\n') {
+            print!("{msg}");
+        } else {
+            println!("{msg}");
+        }
         msg
     };
 

@@ -9,6 +9,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::io::BufReader;
 use std::time::Duration;
+use std::sync::Mutex;
 
 /// Minimal request/response structs for OpenAI Chat Completions API.
 #[derive(Serialize)]
@@ -69,6 +70,14 @@ pub struct OpenAiClient {
     model: String,
     api_base_url: String,
     stream: bool,
+    usage: Mutex<TokenUsage>,
+}
+
+#[derive(Default)]
+struct TokenUsage {
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    total_tokens: u64,
 }
 
 impl OpenAiClient {
@@ -84,6 +93,7 @@ impl OpenAiClient {
             model,
             api_base_url: api_base_url.trim_end_matches('/').to_string(),
             stream,
+            usage: Mutex::new(TokenUsage::default()),
         }
     }
 
@@ -138,12 +148,12 @@ impl OpenAiClient {
             .ok_or_else(|| anyhow!("no choices returned from OpenAI"))?;
 
         if let Some(usage) = &chat_resp.usage {
-            log::warn!(
-                "Token usage: prompt={}, completion={}, total={}",
-                usage.prompt_tokens,
-                usage.completion_tokens,
-                usage.total_tokens
-            );
+            // Recover from a poisoned mutex instead of panicking so the CLI
+            // can continue in the face of concurrent thread panics.
+            let mut u = self.usage.lock().unwrap_or_else(|e| e.into_inner());
+            u.prompt_tokens += usage.prompt_tokens as u64;
+            u.completion_tokens += usage.completion_tokens as u64;
+            u.total_tokens += usage.total_tokens as u64;
         }
 
         Ok(content)
@@ -236,13 +246,13 @@ impl LlmClient for OpenAiClient {
             ticket_summary,
         );
 
-        log::info!(
+        log::debug!(
             "Per-file summarize prompt for {} ({:?}) [truncated]:\n{}",
             file.path,
             file.category,
             truncate(&prompts.user, 1000)
         );
-        log::debug!(
+        log::trace!(
             "Per-file summarize prompt for {} ({:?}) [full]:\n--- SYSTEM ---\n{}\n--- USER ---\n{}",
             file.path,
             file.category,
@@ -349,6 +359,21 @@ impl LlmClient for OpenAiClient {
 
         let content = self.call_chat(&req)?;
         Ok(content)
+    }
+
+    fn take_and_reset_usage(&self) -> Option<(u64, u64, u64)> {
+        let mut u = self.usage.lock().unwrap_or_else(|e| {
+            log::warn!("usage mutex was poisoned, recovering token counters");
+            e.into_inner()
+        });
+
+        if u.total_tokens > 0 {
+            let res = (u.prompt_tokens, u.completion_tokens, u.total_tokens);
+            *u = TokenUsage::default();
+            Some(res)
+        } else {
+            None
+        }
     }
 }
 
