@@ -263,7 +263,6 @@ dependencies = [
  "assert_cmd",
  "clap",
  "colored",
- "commitbot_macros",
  "crossterm",
  "dirs",
  "env_logger",
@@ -275,15 +274,6 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
-]
-
-[[package]]
-name = "commitbot_macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

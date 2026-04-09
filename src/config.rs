@@ -8,12 +8,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Final resolved configuration for commitbot.
-#[derive(Debug, Clone, commitbot_macros::SensitiveFields)]
+#[derive(Debug, Clone)]
 pub struct Config {
     /// LLM provider (openai, ollama)
     pub provider: String,
-    /// OpenAI API key for authentication
-    #[sensitive]
+    /// OpenAI API key for authentication (sensitive – redacted in logs)
     pub openai_api_key: Option<String>,
     /// Base URL for the LLM provider
     pub base_url: Option<String>,
@@ -26,6 +25,12 @@ pub struct Config {
 }
 
 impl Config {
+    /// Returns the names of fields that contain sensitive data (e.g. API keys).
+    /// These are redacted in debug/verbose log output.
+    pub fn sensitive_field_names() -> &'static [&'static str] {
+        &["openai_api_key"]
+    }
+
     /// Build the final config from CLI flags, environment, TOML file, and defaults.
     ///
     /// Precedence (highest to lowest):
