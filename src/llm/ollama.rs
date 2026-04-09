@@ -147,7 +147,12 @@ impl OllamaClient {
         match json::from_str::<OllamaChatWrapper>(&resp_text) {
             Ok(parsed) => {
                 if let Some(usage) = parsed.usage {
-                    let mut u = self.usage.lock().expect("usage mutex poisoned");
+                    // Recover from a poisoned mutex instead of panicking so the CLI
+                    // can continue in the face of concurrent thread panics.
+                    let mut u = self.usage.lock().unwrap_or_else(|e| {
+                        log::warn!("usage mutex was poisoned, recovering token counters");
+                        e.into_inner()
+                    });
                     u.prompt_tokens += usage.prompt_tokens.unwrap_or(0) as u64;
                     u.completion_tokens += usage.completion_tokens.unwrap_or(0) as u64;
                     u.total_tokens += usage.total_tokens.unwrap_or(0) as u64;
@@ -261,7 +266,6 @@ impl LlmClient for OllamaClient {
     ) -> Result<String> {
         let prompts = prompt_builder::commit_message_prompt(branch, files, ticket_summary);
         let content = self.chat(prompts.system, prompts.user, self.stream)?;
-        self.log_and_reset_usage();
         Ok(content)
     }
 
@@ -281,22 +285,20 @@ impl LlmClient for OllamaClient {
             ticket_summary,
         );
         let content = self.chat(prompts.system, prompts.user, self.stream)?;
-        self.log_and_reset_usage();
         Ok(content)
     }
-}
+    fn take_and_reset_usage(&self) -> Option<(u64, u64, u64)> {
+        let mut u = self.usage.lock().unwrap_or_else(|e| {
+            log::warn!("usage mutex was poisoned, recovering token counters");
+            e.into_inner()
+        });
 
-impl OllamaClient {
-    fn log_and_reset_usage(&self) {
-        let mut u = self.usage.lock().expect("usage mutex poisoned");
         if u.total_tokens > 0 {
-            log::warn!(
-                "Token usage (aggregate): prompt={}, completion={}, total={}",
-                u.prompt_tokens,
-                u.completion_tokens,
-                u.total_tokens
-            );
+            let res = (u.prompt_tokens, u.completion_tokens, u.total_tokens);
             *u = TokenUsage::default();
+            Some(res)
+        } else {
+            None
         }
     }
 }

@@ -40,4 +40,9 @@ pub trait LlmClient: Send + Sync {
         items: &[PrItem],
         ticket_summary: Option<&str>,
     ) -> Result<String>;
+
+    /// Take aggregated token usage from the client, resetting counters.
+    fn take_and_reset_usage(&self) -> Option<(u64, u64, u64)> {
+        None
+    }
 }

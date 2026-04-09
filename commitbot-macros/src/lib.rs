@@ -21,8 +21,6 @@ pub fn derive_sensitive_fields(input: TokenStream) -> TokenStream {
                 }
             }
         }
-    } else {
-        // Only support named-field structs
     }
 
     // build an array of string literals

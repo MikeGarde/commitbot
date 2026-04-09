@@ -6,7 +6,7 @@ use log::{Level, LevelFilter};
 
 pub fn init_logger(verbosity: u8) {
     let level = match verbosity {
-        0 => LevelFilter::Error, // default: only errors
+        0 => LevelFilter::Warn,  // default: warn & errors
         1 => LevelFilter::Info,  // -v: info and up
         2 => LevelFilter::Debug, // -vv: debug and up
         _ => LevelFilter::Trace, // -vvv: trace and up

@@ -148,7 +148,9 @@ impl OpenAiClient {
             .ok_or_else(|| anyhow!("no choices returned from OpenAI"))?;
 
         if let Some(usage) = &chat_resp.usage {
-            let mut u = self.usage.lock().expect("usage mutex poisoned");
+            // Recover from a poisoned mutex instead of panicking so the CLI
+            // can continue in the face of concurrent thread panics.
+            let mut u = self.usage.lock().unwrap_or_else(|e| e.into_inner());
             u.prompt_tokens += usage.prompt_tokens as u64;
             u.completion_tokens += usage.completion_tokens as u64;
             u.total_tokens += usage.total_tokens as u64;
@@ -311,7 +313,6 @@ impl LlmClient for OpenAiClient {
         };
 
         let content = self.call_chat(&req)?;
-        self.log_and_reset_usage();
         Ok(content)
     }
 
@@ -357,24 +358,21 @@ impl LlmClient for OpenAiClient {
         };
 
         let content = self.call_chat(&req)?;
-        // Final PR message generation — report aggregated usage once.
-        self.log_and_reset_usage();
         Ok(content)
     }
-}
 
-impl OpenAiClient {
-    fn log_and_reset_usage(&self) {
-        let mut u = self.usage.lock().expect("usage mutex poisoned");
+    fn take_and_reset_usage(&self) -> Option<(u64, u64, u64)> {
+        let mut u = self.usage.lock().unwrap_or_else(|e| {
+            log::warn!("usage mutex was poisoned, recovering token counters");
+            e.into_inner()
+        });
+
         if u.total_tokens > 0 {
-            println!();
-            log::warn!(
-                "Token usage: prompt={}, completion={}, total={}",
-                u.prompt_tokens,
-                u.completion_tokens,
-                u.total_tokens
-            );
+            let res = (u.prompt_tokens, u.completion_tokens, u.total_tokens);
             *u = TokenUsage::default();
+            Some(res)
+        } else {
+            None
         }
     }
 }
