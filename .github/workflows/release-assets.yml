@@ -1,0 +1,153 @@
+name: Release Assets
+
+run-name: Release Assets (${{ inputs.tag }})
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to build and upload assets for"
+        required: true
+        type: string
+      source_run_id:
+        description: "Optional parent release workflow run id"
+        required: false
+        type: string
+      source_run_url:
+        description: "Optional parent release workflow run URL"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-release-assets:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            archive_ext: tar.gz
+            binary_name: commitbot
+            install_cmd: ""
+            linker: ""
+          - name: Linux x86_64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            archive_ext: tar.gz
+            binary_name: commitbot
+            install_cmd: ""
+            linker: ""
+          - name: Amazon Linux / CentOS / RHEL arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            archive_ext: tar.gz
+            binary_name: commitbot
+            install_cmd: sudo apt-get update && sudo apt-get install -y musl-tools
+            linker: musl-gcc
+          - name: Amazon Linux / CentOS / RHEL x86_64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            archive_ext: tar.gz
+            binary_name: commitbot
+            install_cmd: sudo apt-get update && sudo apt-get install -y musl-tools
+            linker: musl-gcc
+          - name: Windows x86_64
+            runner: ubuntu-24.04
+            target: x86_64-pc-windows-gnu
+            archive_ext: zip
+            binary_name: commitbot.exe
+            install_cmd: sudo apt-get update && sudo apt-get install -y mingw-w64
+            linker: ""
+
+    steps:
+      - name: Resolve release tag
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -n "${{ inputs.tag || '' }}" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "No release tag was provided." >&2
+            exit 1
+          fi
+
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.meta.outputs.tag }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install target-specific build tooling
+        if: matrix.install_cmd != ''
+        shell: bash
+        run: ${{ matrix.install_cmd }}
+
+      - name: Run tests
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: cargo test --locked --all-features
+
+      - name: Build release binary
+        shell: bash
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: ${{ matrix.target == 'aarch64-unknown-linux-musl' && matrix.linker || '' }}
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: ${{ matrix.target == 'x86_64-unknown-linux-musl' && matrix.linker || '' }}
+        run: cargo build --locked --release --target ${{ matrix.target }}
+
+      - name: Package tar.gz archive
+        if: matrix.archive_ext == 'tar.gz'
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset="commitbot-${{ steps.meta.outputs.tag }}-${{ matrix.target }}.tar.gz"
+          tar -C "target/${{ matrix.target }}/release" -czf "$asset" "${{ matrix.binary_name }}"
+          echo "ASSET_PATH=$asset" >> "$GITHUB_ENV"
+
+      - name: Package zip archive
+        if: matrix.archive_ext == 'zip'
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset="commitbot-${{ steps.meta.outputs.tag }}-${{ matrix.target }}.zip"
+          cd "target/${{ matrix.target }}/release"
+          zip "../../../${asset}" "${{ matrix.binary_name }}"
+          cd -
+          echo "ASSET_PATH=$asset" >> "$GITHUB_ENV"
+
+      - name: Upload asset to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ steps.meta.outputs.tag }}" "$ASSET_PATH" --clobber
+
+      - name: Publish release if all assets are present
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        shell: bash
+        run: bash devops/publish-if-complete.sh "${{ steps.meta.outputs.tag }}"
+
+      - name: Add run summary
+        shell: bash
+        run: |
+          {
+            echo "## Release Assets"
+            echo
+            echo "- Tag: \`${{ steps.meta.outputs.tag }}\`"
+            echo "- Target: \`${{ matrix.target }}\`"
+            if [[ -n "${{ inputs.source_run_url }}" ]]; then
+              echo "- Triggered by: ${{ inputs.source_run_url }}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

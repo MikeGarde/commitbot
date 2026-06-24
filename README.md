@@ -6,7 +6,6 @@ A Rust-powered CLI that writes meaningful, structured Git commit messages using 
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](https://github.com/MikeGarde/commitbot/blob/main/LICENSE)
 [![Downloads](https://img.shields.io/github/downloads/MikeGarde/commitbot/total.svg?color=blue)](https://GitHub.com/MikeGarde/commitbot/releases/)
 
-
 ---
 
 **Commitbot** analyzes your staged Git changes and helps you craft clear, consistent commit messages that describe *why* changes were made — not just *what* changed.
