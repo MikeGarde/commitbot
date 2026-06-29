@@ -83,7 +83,7 @@ jobs:
           fi
 
       - name: Check out tagged source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.meta.outputs.tag }}
 
@@ -133,12 +133,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "${{ steps.meta.outputs.tag }}" "$ASSET_PATH" --clobber
 
-      - name: Publish release if all assets are present
-        env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        shell: bash
-        run: bash devops/publish-if-complete.sh "${{ steps.meta.outputs.tag }}"
-
       - name: Add run summary
         shell: bash
         run: |
@@ -151,3 +145,20 @@ jobs:
               echo "- Triggered by: ${{ inputs.source_run_url }}"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+  publish-release:
+    name: Publish release
+    needs: build-release-assets
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Publish release and trigger Homebrew tap update
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        shell: bash
+        run: bash devops/publish-if-complete.sh "${{ inputs.tag }}"

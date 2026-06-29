@@ -28,7 +28,7 @@ gh release edit "${TAG}" --draft=false
 echo "Published."
 
 echo "Triggering Homebrew tap formula update..."
-if gh workflow run update-formula.yml \
+if GH_TOKEN="${HOMEBREW_TAP_TOKEN:-}" gh workflow run update-formula.yml \
   --repo MikeGarde/homebrew-tap \
   -f formula=commitbot \
   -f repo=MikeGarde/commitbot \
