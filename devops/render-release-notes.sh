@@ -21,9 +21,9 @@ cat <<EOF
 | RHEL** | [Download]($(asset_url "commitbot-${VERSION}-aarch64-unknown-linux-musl.tar.gz")) | [Download]($(asset_url "commitbot-${VERSION}-x86_64-unknown-linux-musl.tar.gz")) |
 | Windows*** | — | [Download]($(asset_url "commitbot-${VERSION}-x86_64-pc-windows-gnu.zip")) |
 
-* Ubuntu and compatible distributions like Debian, Mint, etc. that use glibc.
-** RHEL and compatible distributions like Amazon, Rocky, etc. that use musl instead of glibc.
-*** Windows x86_64 only; built with the GNU toolchain (mingw-w64).
+\* Ubuntu and compatible distributions like Debian, Mint, etc. that use glibc.
+\** RHEL and compatible distributions like Amazon, Rocky, etc. that use musl instead of glibc.
+\*** Windows x86_64 only; built with the GNU toolchain (mingw-w64).
 
 EOF
 
