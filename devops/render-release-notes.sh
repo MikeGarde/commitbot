@@ -16,10 +16,10 @@ cat <<EOF
 
 | OS | arm64 | x86_64 |
 | --- | --- | --- |
-| macOS | [Download]($(asset_url "commitbot-${VERSION}-aarch64-apple-darwin.tar.gz")) | [Download]($(asset_url "commitbot-${VERSION}-x86_64-apple-darwin.tar.gz")) |
-| Ubuntu* | [Download]($(asset_url "commitbot-${VERSION}-aarch64-unknown-linux-gnu.tar.gz")) | [Download]($(asset_url "commitbot-${VERSION}-x86_64-unknown-linux-gnu.tar.gz")) |
-| RHEL** | [Download]($(asset_url "commitbot-${VERSION}-aarch64-unknown-linux-musl.tar.gz")) | [Download]($(asset_url "commitbot-${VERSION}-x86_64-unknown-linux-musl.tar.gz")) |
-| Windows*** | — | [Download]($(asset_url "commitbot-${VERSION}-x86_64-pc-windows-gnu.zip")) |
+| macOS | [Download]($(asset_url "commitbot-${VERSION}-apple-darwin-aarch64.tar.gz")) | [Download]($(asset_url "commitbot-${VERSION}-apple-darwin-x86_64.tar.gz")) |
+| Ubuntu* | [Download]($(asset_url "commitbot-${VERSION}-unknown-linux-gnu-aarch64.tar.gz")) | [Download]($(asset_url "commitbot-${VERSION}-unknown-linux-gnu-x86_64.tar.gz")) |
+| RHEL** | [Download]($(asset_url "commitbot-${VERSION}-unknown-linux-musl-aarch64.tar.gz")) | [Download]($(asset_url "commitbot-${VERSION}-unknown-linux-musl-x86_64.tar.gz")) |
+| Windows*** | — | [Download]($(asset_url "commitbot-${VERSION}-pc-windows-gnu-x86_64.zip")) |
 
 \* Ubuntu and compatible distributions like Debian, Mint, etc. that use glibc.
 \** RHEL and compatible distributions like Amazon, Rocky, etc. that use musl instead of glibc.

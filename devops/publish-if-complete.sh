@@ -5,13 +5,13 @@ set -euo pipefail
 TAG="${1:?usage: publish-if-complete.sh <tag>}"
 
 EXPECTED=(
-  "commitbot-${TAG}-aarch64-apple-darwin.tar.gz"
-  "commitbot-${TAG}-x86_64-apple-darwin.tar.gz"
-  "commitbot-${TAG}-aarch64-unknown-linux-gnu.tar.gz"
-  "commitbot-${TAG}-x86_64-unknown-linux-gnu.tar.gz"
-  "commitbot-${TAG}-aarch64-unknown-linux-musl.tar.gz"
-  "commitbot-${TAG}-x86_64-unknown-linux-musl.tar.gz"
-  "commitbot-${TAG}-x86_64-pc-windows-gnu.zip"
+  "commitbot-${TAG}-apple-darwin-aarch64.tar.gz"
+  "commitbot-${TAG}-apple-darwin-x86_64.tar.gz"
+  "commitbot-${TAG}-unknown-linux-gnu-aarch64.tar.gz"
+  "commitbot-${TAG}-unknown-linux-gnu-x86_64.tar.gz"
+  "commitbot-${TAG}-unknown-linux-musl-aarch64.tar.gz"
+  "commitbot-${TAG}-unknown-linux-musl-x86_64.tar.gz"
+  "commitbot-${TAG}-pc-windows-gnu-x86_64.zip"
 )
 
 ACTUAL="$(gh release view "${TAG}" --json assets --jq '[.assets[].name]')"
