@@ -35,6 +35,7 @@ jobs:
           - name: Linux arm64
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
+            asset_target: unknown-linux-gnu-aarch64
             archive_ext: tar.gz
             binary_name: commitbot
             install_cmd: ""
@@ -42,6 +43,7 @@ jobs:
           - name: Linux x86_64
             runner: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
+            asset_target: unknown-linux-gnu-x86_64
             archive_ext: tar.gz
             binary_name: commitbot
             install_cmd: ""
@@ -49,6 +51,7 @@ jobs:
           - name: Amazon Linux / CentOS / RHEL arm64
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
+            asset_target: unknown-linux-musl-aarch64
             archive_ext: tar.gz
             binary_name: commitbot
             install_cmd: sudo apt-get update && sudo apt-get install -y musl-tools
@@ -56,6 +59,7 @@ jobs:
           - name: Amazon Linux / CentOS / RHEL x86_64
             runner: ubuntu-24.04
             target: x86_64-unknown-linux-musl
+            asset_target: unknown-linux-musl-x86_64
             archive_ext: tar.gz
             binary_name: commitbot
             install_cmd: sudo apt-get update && sudo apt-get install -y musl-tools
@@ -63,6 +67,7 @@ jobs:
           - name: Windows x86_64
             runner: ubuntu-24.04
             target: x86_64-pc-windows-gnu
+            asset_target: pc-windows-gnu-x86_64
             archive_ext: zip
             binary_name: commitbot.exe
             install_cmd: sudo apt-get update && sudo apt-get install -y mingw-w64
@@ -113,7 +118,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          asset="commitbot-${{ steps.meta.outputs.tag }}-${{ matrix.target }}.tar.gz"
+          asset="commitbot-${{ steps.meta.outputs.tag }}-${{ matrix.asset_target }}.tar.gz"
           tar -C "target/${{ matrix.target }}/release" -czf "$asset" "${{ matrix.binary_name }}"
           echo "ASSET_PATH=$asset" >> "$GITHUB_ENV"
 
@@ -122,7 +127,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          asset="commitbot-${{ steps.meta.outputs.tag }}-${{ matrix.target }}.zip"
+          asset="commitbot-${{ steps.meta.outputs.tag }}-${{ matrix.asset_target }}.zip"
           cd "target/${{ matrix.target }}/release"
           zip "../../../${asset}" "${{ matrix.binary_name }}"
           cd -

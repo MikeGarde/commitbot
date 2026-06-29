@@ -98,11 +98,11 @@ tasks:
         echo "Packaging into dist with version {{.VERSION}}..."
 
         tar -C target/aarch64-apple-darwin/release \
-          -czf dist/commitbot-{{.VERSION}}-aarch64-apple-darwin.tar.gz \
+          -czf dist/commitbot-{{.VERSION}}-apple-darwin-aarch64.tar.gz \
           commitbot
 
         tar -C target/x86_64-apple-darwin/release \
-          -czf dist/commitbot-{{.VERSION}}-x86_64-apple-darwin.tar.gz \
+          -czf dist/commitbot-{{.VERSION}}-apple-darwin-x86_64.tar.gz \
           commitbot
 
         echo "Artifacts created:"
