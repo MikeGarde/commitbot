@@ -2,10 +2,10 @@ use anyhow::{Result, anyhow};
 use log;
 use musli::json;
 use musli::{Decode, Encode};
-use reqwest::StatusCode;
 use reqwest::blocking::Client;
 use std::io::BufReader;
 use std::sync::Mutex;
+use std::time::Instant;
 
 use crate::FileChange;
 use crate::git::{PrItem, PrSummaryMode};
@@ -64,8 +64,9 @@ struct TokenUsage {
 }
 
 impl OllamaClient {
-    pub fn new(base_url: impl Into<String>, model: impl Into<String>, stream: bool) -> Self {
+    pub fn new(base_url: impl Into<String>, model: impl Into<String>, stream: bool, timeout_secs: u64) -> Self {
         let http = Client::builder()
+            .timeout(std::time::Duration::from_secs(timeout_secs))
             .build()
             .expect("failed to build HTTP client");
         Self {
@@ -115,6 +116,7 @@ impl OllamaClient {
 
         let url = format!("{}/api/chat", self.base_url);
 
+        let t0 = Instant::now();
         let resp = self
             .http
             .post(&url)
@@ -127,13 +129,16 @@ impl OllamaClient {
 
         if stream {
             let reader = BufReader::new(resp);
-            return read_stream_to_string(reader, parse_stream_line);
+            let result = read_stream_to_string(reader, parse_stream_line);
+            log::debug!("Ollama response time: {:.2?}", t0.elapsed());
+            return result;
         }
 
         let resp_text = resp
             .text()
             .map_err(|e| anyhow!("Failed to read Ollama response body: {e}"))?;
 
+        log::debug!("Ollama response time: {:.2?}", t0.elapsed());
         log::trace!("Ollama raw JSON response: {resp_text}");
 
         #[derive(Debug, Decode)]
@@ -194,50 +199,9 @@ fn parse_stream_line(line: &str) -> Result<Option<String>> {
 
 impl LlmClient for OllamaClient {
     fn validate_model(&self) -> Result<()> {
-        let url = self.tags_url();
-        let resp = self
-            .http
-            .get(&url)
-            .send()
-            .map_err(|e| anyhow!("Error calling Ollama at {url}: {e}"))?;
-
-        if resp.status() != StatusCode::OK {
-            let status = resp.status();
-            let body = resp.text().unwrap_or_default();
-            return Err(anyhow!(
-                "Ollama model validation failed at {url}: HTTP {} - {}",
-                status.as_u16(),
-                body
-            ));
-        }
-
-        let body = resp
-            .text()
-            .map_err(|e| anyhow!("Failed to read Ollama tags response from {url}: {e}"))?;
-        let parsed: OllamaTagsResponse = json::from_str(&body)
-            .map_err(|e| anyhow!("Failed to decode Ollama tags response from {url}: {e}"))?;
-
-        if parsed.models.iter().any(|model| model.name == self.model) {
-            return Ok(());
-        }
-
-        let available = parsed
-            .models
-            .iter()
-            .map(|model| model.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        Err(anyhow!(
-            "Model {:?} was not found at {}. Available models: {}",
-            self.model,
-            url,
-            if available.is_empty() {
-                "<none>"
-            } else {
-                &available
-            }
-        ))
+        // Skipping model validation for Ollama; use a future "list models" command
+        // to query /api/tags if the user requests it.
+        Ok(())
     }
 
     fn summarize_file(
@@ -309,19 +273,19 @@ mod tests {
 
     #[test]
     fn trims_trailing_slash_in_tags_url() {
-        let client = OllamaClient::new("http://localhost:11434/", "qwen3-coder:30b", false);
+        let client = OllamaClient::new("http://localhost:11434/", "gemma4:31b", false, 90);
         assert_eq!(client.tags_url(), "http://localhost:11434/api/tags");
     }
 
     #[test]
     fn decodes_ollama_tags_payload() {
-        let body = r#"{"models":[{"name":"qwen3-coder:30b"},{"name":"gpt-oss:20b"}]}"#;
+        let body = r#"{"models":[{"name":"gemma4:31b"},{"name":"qwen3-coder:30b"},{"name":"gpt-oss:20b"}]}"#;
         let parsed: OllamaTagsResponse = json::from_str(body).expect("valid tags payload");
 
         assert!(parsed
             .models
             .iter()
-            .any(|model| model.name == "qwen3-coder:30b"));
+            .any(|model| model.name == "gemma4:31b"));
         assert!(!parsed
             .models
             .iter()

@@ -81,9 +81,9 @@ struct TokenUsage {
 }
 
 impl OpenAiClient {
-    pub fn new(api_key: String, model: String, api_base_url: String, stream: bool) -> Self {
+    pub fn new(api_key: String, model: String, api_base_url: String, stream: bool, timeout_secs: u64) -> Self {
         let client = Client::builder()
-            .timeout(Duration::from_secs(90))
+            .timeout(Duration::from_secs(timeout_secs))
             .build()
             .expect("failed to build HTTP client");
 
@@ -122,6 +122,7 @@ impl OpenAiClient {
 
         log::info!("Calling OpenAI model {:?}", &req.model);
 
+        let t0 = std::time::Instant::now();
         let resp = self
             .client
             .post(url)
@@ -141,6 +142,7 @@ impl OpenAiClient {
         }
 
         let chat_resp: ChatResponse = resp.json().context("failed to parse OpenAI response")?;
+        log::debug!("OpenAI response time: {:.2?}", t0.elapsed());
         let content = chat_resp
             .choices
             .first()
@@ -164,6 +166,7 @@ impl OpenAiClient {
 
         log::info!("Streaming OpenAI model {:?}", &req.model);
 
+        let t0 = std::time::Instant::now();
         let resp = self
             .client
             .post(url)
@@ -183,7 +186,9 @@ impl OpenAiClient {
         }
 
         let reader = BufReader::new(resp);
-        read_stream_to_string(reader, parse_stream_line)
+        let result = read_stream_to_string(reader, parse_stream_line);
+        log::debug!("OpenAI streaming response time: {:.2?}", t0.elapsed());
+        result
     }
 }
 
@@ -401,6 +406,7 @@ mod tests {
             "gpt-5-nano".into(),
             "https://api.openai.com".into(),
             false,
+            90,
         );
 
         assert_eq!(
@@ -416,6 +422,7 @@ mod tests {
             "gpt-5-nano".into(),
             "https://api.openai.com/v1".into(),
             false,
+            90,
         );
 
         assert_eq!(

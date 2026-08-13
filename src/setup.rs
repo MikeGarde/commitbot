@@ -18,9 +18,10 @@ pub fn build_llm_client(cfg: &Config) -> Result<Box<dyn LlmClient>> {
                 .unwrap_or_else(|| "https://api.openai.com".to_string());
 
             log::debug!(
-                "Using OpenAiClient with model: {} (stream={})",
+                "Using OpenAiClient with model: {} (stream={}, timeout={}s)",
                 cfg.model,
-                cfg.stream
+                cfg.stream,
+                cfg.request_timeout_secs
             );
 
             Ok(Box::new(OpenAiClient::new(
@@ -28,6 +29,7 @@ pub fn build_llm_client(cfg: &Config) -> Result<Box<dyn LlmClient>> {
                 cfg.model.clone(),
                 base_url,
                 cfg.stream,
+                cfg.request_timeout_secs,
             )))
         }
         "ollama" => {
@@ -37,15 +39,17 @@ pub fn build_llm_client(cfg: &Config) -> Result<Box<dyn LlmClient>> {
                 .unwrap_or_else(|| "http://localhost:11434".to_string());
 
             log::debug!(
-                "Using OllamaClient with model: {} (stream={})",
+                "Using OllamaClient with model: {} (stream={}, timeout={}s)",
                 cfg.model,
-                cfg.stream
+                cfg.stream,
+                cfg.request_timeout_secs
             );
 
             Ok(Box::new(OllamaClient::new(
                 base_url,
                 cfg.model.clone(),
                 cfg.stream,
+                cfg.request_timeout_secs,
             )))
         }
         other => Err(anyhow!("Unknown provider: {}", other)),

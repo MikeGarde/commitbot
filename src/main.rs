@@ -188,6 +188,7 @@ fn summarize_files_concurrently(
                 scope.spawn(move || {
                     log::debug!("Summarizing file: {}", path);
 
+                    let t0 = std::time::Instant::now();
                     let res = (|| -> Result<String> {
                         let fc = FileChange {
                             path,
@@ -205,6 +206,7 @@ fn summarize_files_concurrently(
                         )?;
                         Ok(summary)
                     })();
+                    let elapsed = t0.elapsed();
 
                     pb.inc(1);
 
@@ -212,10 +214,10 @@ fn summarize_files_concurrently(
                         match &res {
                             Ok(summary) => {
                                 let snippet = preview_snippet(summary);
-                                line.finish_with_message(dimmed(&snippet));
+                                line.finish_with_message(dimmed(&format!("{snippet} ({elapsed:.2?})")));
                             }
                             Err(err) => {
-                                line.finish_with_message(dimmed(&format!("error: {err}")));
+                                line.finish_with_message(dimmed(&format!("error: {err} ({elapsed:.2?})")));
                             }
                         }
                     }
@@ -384,12 +386,15 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     if cfg.stream {
         let _msg = llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())?;
     } else {
+        let t0 = std::time::Instant::now();
         let msg = llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())?;
+        let elapsed = t0.elapsed();
         if msg.ends_with('\n') {
             print!("{msg}");
         } else {
             println!("{msg}");
         }
+        println!("Commit message generated in {elapsed:.2?}");
     }
 
     println!();
@@ -518,12 +523,15 @@ fn run_auto(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     if cfg.stream {
         let _msg = llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())?;
     } else {
+        let t0 = std::time::Instant::now();
         let msg = llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())?;
+        let elapsed = t0.elapsed();
         if msg.ends_with('\n') {
             print!("{msg}");
         } else {
             println!("{msg}");
         }
+        println!("Commit message generated in {elapsed:.2?}");
     }
 
     println!();
@@ -532,8 +540,8 @@ fn run_auto(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     }
 
     Ok(())
-}
 
+}
 fn run_pr(
     cli: &Cli,
     cfg: &Config,
@@ -583,20 +591,24 @@ fn run_pr(
     let ticket_summary = resolved_ticket_summary(cli);
     let _pr_message = if cfg.stream {
         println!();
+        let t0 = std::time::Instant::now();
         let msg =
             llm.generate_pr_message(base, &from_branch, mode, &items, ticket_summary.as_deref())?;
-        println!();
+        println!("\nPR message generated in {:.2?}", t0.elapsed());
         msg
         } else {
         println!();
+        let t0 = std::time::Instant::now();
         let msg =
             llm.generate_pr_message(base, &from_branch, mode, &items, ticket_summary.as_deref())?;
+        let elapsed = t0.elapsed();
 
         if msg.ends_with('\n') {
             print!("{msg}");
         } else {
             println!("{msg}");
         }
+        println!("PR message generated in {elapsed:.2?}");
         msg
     };
 
