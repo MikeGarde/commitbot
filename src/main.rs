@@ -306,7 +306,11 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
 
     let total_files = file_pairs.len();
     for (idx, (path, diff)) in file_pairs.into_iter().enumerate() {
-        let category = categorize_file_interactive(idx, total_files, &path)?;
+        let category = if commitbot::is_lock_file(&path) {
+            FileCategory::Lock
+        } else {
+            categorize_file_interactive(idx, total_files, &path)?
+        };
         file_changes.push(FileChange {
             path,
             category,
@@ -329,7 +333,9 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
                 .expect("progress style template"),
         );
         line.set_prefix(fc.path.clone());
-        if matches!(fc.category, FileCategory::Ignored) {
+        if matches!(fc.category, FileCategory::Lock) {
+            line.finish_with_message(dimmed("lock file updated, not summarized"));
+        } else if matches!(fc.category, FileCategory::Ignored) {
             line.finish_with_message(dimmed("ignored"));
         } else {
             line.enable_steady_tick(Duration::from_millis(120));
@@ -346,20 +352,27 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
 
     let mut indices_to_summarize = Vec::new();
     let mut ignored_count = 0usize;
+    let mut lock_count = 0usize;
 
     for (idx, fc) in file_changes.iter().enumerate() {
-        if matches!(fc.category, FileCategory::Ignored) {
-            pb.inc(1);
-            ignored_count += 1;
-        } else {
-            indices_to_summarize.push(idx);
+        match fc.category {
+            FileCategory::Ignored => {
+                pb.inc(1);
+                ignored_count += 1;
+            }
+            FileCategory::Lock => {
+                pb.inc(1);
+                lock_count += 1;
+            }
+            _ => indices_to_summarize.push(idx),
         }
     }
 
     log::info!(
-        "Summarizing {} files ({} ignored). max_concurrent_requests = {}",
+        "Summarizing {} files ({} ignored, {} lock). max_concurrent_requests = {}",
         indices_to_summarize.len(),
         ignored_count,
+        lock_count,
         cfg.max_concurrent_requests,
     );
 
@@ -450,11 +463,18 @@ fn run_auto(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
 
     let mut file_changes: Vec<FileChange> = file_pairs
         .into_iter()
-        .map(|(path, diff)| FileChange {
-            path,
-            category: FileCategory::Main,
-            diff,
-            summary: None,
+        .map(|(path, diff)| {
+            let category = if commitbot::is_lock_file(&path) {
+                FileCategory::Lock
+            } else {
+                FileCategory::Main
+            };
+            FileChange {
+                path,
+                category,
+                diff,
+                summary: None,
+            }
         })
         .collect();
 
@@ -481,8 +501,12 @@ fn run_auto(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
             fc.path.clone()
         };
         line.set_prefix(prefix);
-        line.enable_steady_tick(Duration::from_millis(120));
-        line.set_message("waiting");
+        if matches!(fc.category, FileCategory::Lock) {
+            line.finish_with_message(dimmed("lock file updated, not summarized"));
+        } else {
+            line.enable_steady_tick(Duration::from_millis(120));
+            line.set_message("waiting");
+        }
         file_lines.push(line);
     }
 
@@ -492,11 +516,22 @@ fn run_auto(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
             .unwrap_or_else(|_| ProgressStyle::default_bar()),
     );
 
-    let indices_to_summarize: Vec<usize> = (0..total).collect();
+    let mut indices_to_summarize: Vec<usize> = Vec::new();
+    let mut lock_count = 0usize;
+
+    for (idx, fc) in file_changes.iter().enumerate() {
+        if matches!(fc.category, FileCategory::Lock) {
+            pb.inc(1);
+            lock_count += 1;
+        } else {
+            indices_to_summarize.push(idx);
+        }
+    }
 
     log::info!(
-        "Auto-summarizing {} files. max_concurrent_requests = {}",
-        total,
+        "Auto-summarizing {} files ({} lock). max_concurrent_requests = {}",
+        indices_to_summarize.len(),
+        lock_count,
         cfg.max_concurrent_requests,
     );
 
