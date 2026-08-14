@@ -412,7 +412,7 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
 
     println!();
     if let Some((p, c, t)) = llm.take_and_reset_usage() {
-        print!("\n");
+        println!();
         println!("Provider: {} {}", cfg.provider, cfg.model );
         println!("Tokens:   prompt={}, completion={}, total={}", p, c, t);
     }
@@ -573,7 +573,7 @@ fn run_auto(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
 
     println!();
     if let Some((p, c, t)) = llm.take_and_reset_usage() {
-        print!("\n");
+        println!();
         println!("Provider: {} {}", cfg.provider, cfg.model );
         println!("Tokens:   prompt={}, completion={}, total={}", p, c, t);
     }
