@@ -18,7 +18,7 @@ It can summarize diffs, ask you how each file relates to the purpose of the comm
 
 - **Interactive “ask” mode** – Classify each file as main, supporting, or consequential.
 - **Quick mode** – Instantly summarize staged diffs into a commit message.
-- **LLM-powered** – Uses OpenAI’s GPT models to generate concise and structured messages.
+- **LLM-powered** – Uses OpenAI, or a local model via [Ollama](#providers) or [LM Studio](#providers).
 - **Configurable** – Choose models, tweak behavior, and set defaults in a config file.
 - **Pull request summaries** – Generate clean, readable PR descriptions from your commit history.
 
@@ -26,7 +26,7 @@ It can summarize diffs, ask you how each file relates to the purpose of the comm
 
 ## Installation
 
-You’ll need an OpenAI API key set as an environment variable:
+To use OpenAI (the default provider) you’ll need an API key set as an environment variable:
 
 ```bash
 export OPENAI_API_KEY="sk-..."
@@ -122,6 +122,25 @@ model = "gpt-4o-mini"
 
 ["MikeGarde/commitbot"]
 model = "gpt-5-nano"
+```
+
+---
+
+## Providers
+
+Set `provider` to choose a backend. Any of them can be overridden per repository.
+
+| Provider   | Default `url`            | API key  |
+|------------|--------------------------|----------|
+| `openai`   | `https://api.openai.com` | required |
+| `ollama`   | `http://localhost:11434` | not used |
+| `lmstudio` | `http://localhost:1234`  | optional |
+
+```toml
+[default]
+provider = "lmstudio"
+model = "qwen/qwen3-coder-30b"
+url = "http://192.168.1.16:1234/v1"
 ```
 
 ---

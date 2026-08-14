@@ -109,6 +109,63 @@ stream = true
 }
 
 #[test]
+fn lmstudio_needs_no_url_or_api_key() {
+    // Like ollama: the url is optional and falls back to a local default,
+    // and no API key is required.
+    let config_path = write_temp_config(
+        "lmstudio_defaults",
+        r#"
+[default]
+provider = "lmstudio"
+model = "qwen/qwen3-coder-30b"
+"#,
+    );
+
+    let cli = Cli::parse_from([
+        "commitbot",
+        "--config",
+        config_path.to_str().expect("utf-8 path"),
+    ]);
+
+    let cfg = Config::from_sources(&cli).expect("lmstudio config should resolve");
+    assert_eq!(cfg.provider, "lmstudio");
+    assert_eq!(cfg.model, "qwen/qwen3-coder-30b");
+    assert_eq!(cfg.base_url, None, "the default is applied when building the client");
+
+    fs::remove_file(config_path).ok();
+}
+
+#[test]
+fn lmstudio_url_can_point_at_a_remote_host() {
+    let config_path = write_temp_config(
+        "lmstudio_remote",
+        r#"
+[default]
+provider = "lmstudio"
+model = "qwen/qwen3-coder-30b"
+url = "http://localhost:1234/v1"
+"#,
+    );
+
+    let cli = Cli::parse_from([
+        "commitbot",
+        "--config",
+        config_path.to_str().expect("utf-8 path"),
+        "--url",
+        "http://gpu.example.com:1234/v1",
+    ]);
+
+    let cfg = Config::from_sources(&cli).expect("cli url should override file");
+    assert_eq!(cfg.provider, "lmstudio");
+    assert_eq!(
+        cfg.base_url.as_deref(),
+        Some("http://gpu.example.com:1234/v1")
+    );
+
+    fs::remove_file(config_path).ok();
+}
+
+#[test]
 fn invalid_openai_config_returns_error() {
     let config_path = write_temp_config(
         "invalid_openai",
