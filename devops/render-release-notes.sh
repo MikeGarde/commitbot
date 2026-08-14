@@ -25,6 +25,12 @@ cat <<EOF
 \** RHEL and compatible distributions like Amazon, Rocky, etc. that use musl instead of glibc.
 \*** Windows x86_64 only; built with the GNU toolchain (mingw-w64).
 
+## Install on Amazon Linux
+
+~~~sh
+curl -fsSL "https://github.com/${REPO}/releases/download/${VERSION}/commitbot-${VERSION}-unknown-linux-musl-\$(uname -m).tar.gz" | sudo tar -xz --no-same-owner -C /usr/local/bin commitbot
+~~~
+
 EOF
 
 if [[ -n "${NOTES_FILE}" && -f "${NOTES_FILE}" ]]; then

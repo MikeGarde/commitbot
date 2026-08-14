@@ -1,7 +1,41 @@
 use commitbot::git::{
     find_first_pr_number, format_pr_commit_appendix_with_remote, parse_remote_repo,
-    short_commit_hash, split_diff_by_file, PrItem, PrSummaryMode,
+    short_commit_hash, split_diff_by_file, staged_diff_for_file, staged_files, PrItem,
+    PrSummaryMode,
 };
+use std::process::Command;
+
+/// Set up a throwaway git repo with a staged change in a nested file, and
+/// return its tempdir handle plus the nested directory's path.
+fn repo_with_staged_nested_file() -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+
+    let run = |args: &[&str]| {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .status()
+            .expect("run git");
+        assert!(status.success(), "git {:?} failed", args);
+    };
+
+    run(&["init", "-q"]);
+    run(&["config", "user.email", "test@example.com"]);
+    run(&["config", "user.name", "Test"]);
+
+    let nested_dir = root.join("app").join("Models");
+    std::fs::create_dir_all(&nested_dir).expect("mkdir");
+    let file = nested_dir.join("OrderItem.php");
+    std::fs::write(&file, "original\n").expect("write");
+    run(&["add", "."]);
+    run(&["commit", "-q", "-m", "initial"]);
+
+    std::fs::write(&file, "original\nchanged\n").expect("rewrite");
+    run(&["add", "."]);
+
+    (dir, nested_dir)
+}
 
 #[test]
 fn parses_github_ssh_remote() {
@@ -134,6 +168,29 @@ fn short_commit_hash_works() {
 fn short_commit_hash_short_input() {
     let result = short_commit_hash("abc");
     assert_eq!(result, "abc");
+}
+
+#[test]
+fn staged_diff_for_file_works_from_subdirectory() {
+    let (_dir, nested_dir) = repo_with_staged_nested_file();
+
+    let original_cwd = std::env::current_dir().expect("current dir");
+    std::env::set_current_dir(&nested_dir).expect("chdir into nested dir");
+
+    let result = (|| {
+        let files = staged_files()?;
+        assert_eq!(files, vec!["app/Models/OrderItem.php".to_string()]);
+
+        let diff = staged_diff_for_file(&files[0])?;
+        assert!(
+            diff.contains("+changed"),
+            "expected diff to contain the staged change, got: {diff:?}"
+        );
+        anyhow::Ok(())
+    })();
+
+    std::env::set_current_dir(original_cwd).expect("restore cwd");
+    result.expect("staged diff lookup from subdirectory");
 }
 
 #[test]

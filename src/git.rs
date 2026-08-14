@@ -91,10 +91,20 @@ pub fn git_output(args: &[&str]) -> Result<String> {
         .with_context(|| format!("failed to run git {:?}", args))?;
 
     if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = stderr.trim();
+        if stderr.is_empty() {
+            return Err(anyhow!(
+                "git {:?} exited with status {:?}",
+                args,
+                output.status.code()
+            ));
+        }
         return Err(anyhow!(
-            "git {:?} exited with status {:?}",
+            "git {:?} exited with status {:?}: {}",
             args,
-            output.status.code()
+            output.status.code(),
+            stderr
         ));
     }
 
@@ -137,8 +147,14 @@ pub fn staged_files() -> Result<Vec<String>> {
 }
 
 /// Get per-file staged diff.
+///
+/// `staged_files` returns paths relative to the repo root, but a bare pathspec
+/// is resolved by git relative to the current working directory. Anchor it
+/// with the `:/` top-level magic pathspec so this still works when commitbot
+/// is invoked from a subdirectory of the repo.
 pub fn staged_diff_for_file(path: &str) -> Result<String> {
-    let diff = git_output(&["diff", "--cached", "--", path])?;
+    let pathspec = format!(":/{path}");
+    let diff = git_output(&["diff", "--cached", "--", &pathspec])?;
     Ok(diff)
 }
 

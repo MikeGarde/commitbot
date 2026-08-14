@@ -22,6 +22,8 @@ pub struct Config {
     pub max_concurrent_requests: usize,
     /// Whether to stream responses from the LLM
     pub stream: bool,
+    /// HTTP request timeout in seconds for LLM calls
+    pub request_timeout_secs: u64,
 }
 
 impl Config {
@@ -53,6 +55,7 @@ impl Config {
 
         let max_concurrent_requests = r.get_usize("max_concurrent_requests", 4);
         let stream = r.get_bool("stream", true);
+        let request_timeout_secs = r.get_u64("request_timeout_secs", 90);
 
         // Cleanup: trim stray quotes if any upstream included them
         let provider = provider.trim_matches('"').to_string();
@@ -73,6 +76,7 @@ impl Config {
             base_url,
             max_concurrent_requests,
             stream,
+            request_timeout_secs,
         })
     }
 }
@@ -86,6 +90,7 @@ struct FileConfig {
     pub base_url: Option<String>,
     pub max_concurrent_requests: Option<usize>,
     pub stream: Option<bool>,
+    pub request_timeout_secs: Option<u64>,
 }
 
 /// Root of the TOML file:
@@ -169,6 +174,7 @@ impl<'a> ConfigResolver<'a> {
             "base_url" => Some("COMMITBOT_BASE_URL"),
             "max_concurrent_requests" => Some("COMMITBOT_MAX_CONCURRENT_REQUESTS"),
             "stream" => Some("COMMITBOT_STREAM"),
+            "request_timeout_secs" => Some("COMMITBOT_REQUEST_TIMEOUT_SECS"),
             _ => None,
         }
     }
@@ -202,6 +208,18 @@ impl<'a> ConfigResolver<'a> {
         }
     }
 
+    fn file_u64(&self, key: &str, repo: bool) -> Option<u64> {
+        let cfg = if repo {
+            &self.file_repo
+        } else {
+            &self.file_default
+        };
+        match key {
+            "request_timeout_secs" => cfg.request_timeout_secs,
+            _ => None,
+        }
+    }
+
     fn file_bool(&self, key: &str, repo: bool) -> Option<bool> {
         let cfg = if repo {
             &self.file_repo
@@ -224,6 +242,11 @@ impl<'a> ConfigResolver<'a> {
     fn env_usize(&self, key: &str) -> Option<usize> {
         let env_key = self.env_key_for(key)?;
         env::var(env_key).ok().and_then(|s| s.parse::<usize>().ok())
+    }
+
+    fn env_u64(&self, key: &str) -> Option<u64> {
+        let env_key = self.env_key_for(key)?;
+        env::var(env_key).ok().and_then(|s| s.parse::<u64>().ok())
     }
 
     fn env_bool(&self, key: &str) -> Option<bool> {
@@ -423,6 +446,28 @@ impl<'a> ConfigResolver<'a> {
         if let Some(v) = self.cli_usize(key) {
             value = v;
             src = ValueSource::Cli;
+        }
+
+        self.log_decision(key, &value, src);
+        value
+    }
+
+    /// Resolve a u64.
+    pub fn get_u64(&self, key: &str, default: u64) -> u64 {
+        let mut value = default;
+        let mut src = ValueSource::Hardcoded;
+
+        if let Some(v) = self.file_u64(key, false) {
+            value = v;
+            src = ValueSource::FileDefault;
+        }
+        if let Some(v) = self.file_u64(key, true) {
+            value = v;
+            src = ValueSource::FileRepo;
+        }
+        if let Some(v) = self.env_u64(key) {
+            value = v;
+            src = ValueSource::Env;
         }
 
         self.log_decision(key, &value, src);
