@@ -37,11 +37,14 @@ struct OllamaUsage {
     total_tokens: Option<u32>,
 }
 
+// Scaffolding for a future "list models" command; only exercised by tests today.
+#[allow(dead_code)]
 #[derive(Debug, Decode)]
 struct OllamaTagModel {
     name: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Decode)]
 struct OllamaTagsResponse {
     models: Vec<OllamaTagModel>,
@@ -173,6 +176,8 @@ impl OllamaClient {
         }
     }
 
+    /// Scaffolding for a future "list models" command; only exercised by tests today.
+    #[allow(dead_code)]
     fn tags_url(&self) -> String {
         format!("{}/api/tags", self.base_url)
     }
