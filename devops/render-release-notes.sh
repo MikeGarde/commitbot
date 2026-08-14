@@ -16,9 +16,9 @@ cat <<EOF
 
 | OS | arm64 | x86_64 |
 | --- | --- | --- |
-| macOS | [Download]($(asset_url "commitbot-${VERSION}-apple-darwin-aarch64.tar.gz")) | [Download]($(asset_url "commitbot-${VERSION}-apple-darwin-x86_64.tar.gz")) |
-| Ubuntu* | [Download]($(asset_url "commitbot-${VERSION}-unknown-linux-gnu-aarch64.tar.gz")) | [Download]($(asset_url "commitbot-${VERSION}-unknown-linux-gnu-x86_64.tar.gz")) |
-| RHEL** | [Download]($(asset_url "commitbot-${VERSION}-unknown-linux-musl-aarch64.tar.gz")) | [Download]($(asset_url "commitbot-${VERSION}-unknown-linux-musl-x86_64.tar.gz")) |
+| macOS | [Download]($(asset_url "commitbot-${VERSION}-apple-darwin-aarch64.gz")) | [Download]($(asset_url "commitbot-${VERSION}-apple-darwin-x86_64.gz")) |
+| Ubuntu* | [Download]($(asset_url "commitbot-${VERSION}-unknown-linux-gnu-aarch64.gz")) | [Download]($(asset_url "commitbot-${VERSION}-unknown-linux-gnu-x86_64.gz")) |
+| RHEL** | [Download]($(asset_url "commitbot-${VERSION}-unknown-linux-musl-aarch64.gz")) | [Download]($(asset_url "commitbot-${VERSION}-unknown-linux-musl-x86_64.gz")) |
 | Windows*** | — | [Download]($(asset_url "commitbot-${VERSION}-pc-windows-gnu-x86_64.zip")) |
 
 \* Ubuntu and compatible distributions like Debian, Mint, etc. that use glibc.
@@ -28,7 +28,8 @@ cat <<EOF
 ## Install on Amazon Linux
 
 ~~~sh
-curl -fsSL "https://github.com/${REPO}/releases/download/${VERSION}/commitbot-${VERSION}-unknown-linux-musl-\$(uname -m).tar.gz" | sudo tar -xz --no-same-owner -C /usr/local/bin commitbot
+curl -fsSL "https://github.com/${REPO}/releases/download/${VERSION}/commitbot-${VERSION}-unknown-linux-musl-\$(uname -m).gz" | gunzip | sudo tee /usr/local/bin/commitbot > /dev/null
+sudo chmod +x /usr/local/bin/commitbot
 ~~~
 
 EOF

@@ -36,7 +36,7 @@ jobs:
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             asset_target: unknown-linux-gnu-aarch64
-            archive_ext: tar.gz
+            archive_ext: gz
             binary_name: commitbot
             install_cmd: ""
             linker: ""
@@ -44,7 +44,7 @@ jobs:
             runner: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             asset_target: unknown-linux-gnu-x86_64
-            archive_ext: tar.gz
+            archive_ext: gz
             binary_name: commitbot
             install_cmd: ""
             linker: ""
@@ -52,7 +52,7 @@ jobs:
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
             asset_target: unknown-linux-musl-aarch64
-            archive_ext: tar.gz
+            archive_ext: gz
             binary_name: commitbot
             install_cmd: sudo apt-get update && sudo apt-get install -y musl-tools
             linker: musl-gcc
@@ -60,7 +60,7 @@ jobs:
             runner: ubuntu-24.04
             target: x86_64-unknown-linux-musl
             asset_target: unknown-linux-musl-x86_64
-            archive_ext: tar.gz
+            archive_ext: gz
             binary_name: commitbot
             install_cmd: sudo apt-get update && sudo apt-get install -y musl-tools
             linker: musl-gcc
@@ -113,13 +113,13 @@ jobs:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: ${{ matrix.target == 'x86_64-unknown-linux-musl' && matrix.linker || '' }}
         run: cargo build --locked --release --target ${{ matrix.target }}
 
-      - name: Package tar.gz archive
-        if: matrix.archive_ext == 'tar.gz'
+      - name: Compress release binary
+        if: matrix.archive_ext == 'gz'
         shell: bash
         run: |
           set -euo pipefail
-          asset="commitbot-${{ steps.meta.outputs.tag }}-${{ matrix.asset_target }}.tar.gz"
-          tar -C "target/${{ matrix.target }}/release" -czf "$asset" "${{ matrix.binary_name }}"
+          asset="commitbot-${{ steps.meta.outputs.tag }}-${{ matrix.asset_target }}.gz"
+          gzip -n -c "target/${{ matrix.target }}/release/${{ matrix.binary_name }}" > "$asset"
           echo "ASSET_PATH=$asset" >> "$GITHUB_ENV"
 
       - name: Package zip archive
