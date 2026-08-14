@@ -5,7 +5,7 @@ use crate::FileChange;
 use crate::git::{PrItem, PrSummaryMode};
 use anyhow::{Context, Result, anyhow};
 use reqwest::StatusCode;
-use reqwest::blocking::Client;
+use reqwest::blocking::{Client, RequestBuilder};
 use serde::{Deserialize, Serialize};
 use std::io::BufReader;
 use std::time::Duration;
@@ -49,6 +49,16 @@ struct ChatUsage {
 }
 
 #[derive(Deserialize)]
+struct ModelListResponse {
+    data: Vec<ModelListEntry>,
+}
+
+#[derive(Deserialize)]
+struct ModelListEntry {
+    id: String,
+}
+
+#[derive(Deserialize)]
 struct StreamResponse {
     choices: Vec<StreamChoice>,
 }
@@ -63,13 +73,26 @@ struct StreamDelta {
     content: Option<String>,
 }
 
-/// OpenAI-based implementation of LlmClient.
+/// How to confirm the configured model exists on the upstream server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelValidation {
+    /// `GET {base}/v1/models/{model}` — OpenAI's retrieve-model endpoint.
+    Retrieve,
+    /// `GET {base}/v1/models`, then look for the id in the listing. LM Studio
+    /// only implements the list endpoint, not retrieve.
+    List,
+}
+
+/// Client for OpenAI and any server speaking the same chat-completions API.
 pub struct OpenAiClient {
     client: Client,
-    api_key: String,
+    api_key: Option<String>,
     model: String,
     api_base_url: String,
     stream: bool,
+    /// Name used in logs and error messages (e.g. "OpenAI", "LM Studio").
+    provider_label: String,
+    model_validation: ModelValidation,
     usage: Mutex<TokenUsage>,
 }
 
@@ -82,6 +105,30 @@ struct TokenUsage {
 
 impl OpenAiClient {
     pub fn new(api_key: String, model: String, api_base_url: String, stream: bool, timeout_secs: u64) -> Self {
+        Self::openai_compatible(
+            Some(api_key),
+            model,
+            api_base_url,
+            stream,
+            timeout_secs,
+            "OpenAI",
+            ModelValidation::Retrieve,
+        )
+    }
+
+    /// Client for an OpenAI-compatible server (LM Studio, self-hosted gateways).
+    ///
+    /// `api_key` is optional: LM Studio serves unauthenticated requests by
+    /// default, and omitting the key sends no `Authorization` header at all.
+    pub fn openai_compatible(
+        api_key: Option<String>,
+        model: String,
+        api_base_url: String,
+        stream: bool,
+        timeout_secs: u64,
+        provider_label: impl Into<String>,
+        model_validation: ModelValidation,
+    ) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(timeout_secs))
             .build()
@@ -93,24 +140,40 @@ impl OpenAiClient {
             model,
             api_base_url: api_base_url.trim_end_matches('/').to_string(),
             stream,
+            provider_label: provider_label.into(),
+            model_validation,
             usage: Mutex::new(TokenUsage::default()),
         }
     }
 
-    fn chat_url(&self) -> String {
-        if self.api_base_url.ends_with("/v1") {
-            format!("{}/chat/completions", self.api_base_url)
-        } else {
-            format!("{}/v1/chat/completions", self.api_base_url)
+    /// Attach bearer auth when a key is configured, otherwise send the request
+    /// unauthenticated.
+    fn authed(&self, req: RequestBuilder) -> RequestBuilder {
+        match &self.api_key {
+            Some(key) => req.bearer_auth(key),
+            None => req,
         }
     }
 
-    fn model_url(&self) -> String {
+    /// Join `path` under `/v1`, tolerating a base URL that already ends in `/v1`.
+    fn v1_url(&self, path: &str) -> String {
         if self.api_base_url.ends_with("/v1") {
-            format!("{}/models/{}", self.api_base_url, self.model)
+            format!("{}/{}", self.api_base_url, path)
         } else {
-            format!("{}/v1/models/{}", self.api_base_url, self.model)
+            format!("{}/v1/{}", self.api_base_url, path)
         }
+    }
+
+    fn chat_url(&self) -> String {
+        self.v1_url("chat/completions")
+    }
+
+    fn model_url(&self) -> String {
+        self.v1_url(&format!("models/{}", self.model))
+    }
+
+    fn models_url(&self) -> String {
+        self.v1_url("models")
     }
 
     fn call_chat(&self, req: &ChatRequest) -> Result<String> {
@@ -120,34 +183,35 @@ impl OpenAiClient {
 
         let url = self.chat_url();
 
-        log::info!("Calling OpenAI model {:?}", &req.model);
+        log::info!("Calling {} model {:?}", self.provider_label, req.model);
 
         let t0 = std::time::Instant::now();
         let resp = self
-            .client
-            .post(url)
-            .bearer_auth(&self.api_key)
+            .authed(self.client.post(&url))
             .json(req)
             .send()
-            .context("failed to send request to OpenAI")?;
+            .with_context(|| format!("failed to send request to {} at {}", self.provider_label, url))?;
 
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().unwrap_or_default();
             return Err(anyhow!(
-                "OpenAI API error: HTTP {} - {}",
+                "{} API error: HTTP {} - {}",
+                self.provider_label,
                 status.as_u16(),
                 text
             ));
         }
 
-        let chat_resp: ChatResponse = resp.json().context("failed to parse OpenAI response")?;
-        log::debug!("OpenAI response time: {:.2?}", t0.elapsed());
+        let chat_resp: ChatResponse = resp
+            .json()
+            .with_context(|| format!("failed to parse {} response", self.provider_label))?;
+        log::debug!("{} response time: {:.2?}", self.provider_label, t0.elapsed());
         let content = chat_resp
             .choices
             .first()
             .map(|c| c.message.content.clone())
-            .ok_or_else(|| anyhow!("no choices returned from OpenAI"))?;
+            .ok_or_else(|| anyhow!("no choices returned from {}", self.provider_label))?;
 
         if let Some(usage) = &chat_resp.usage {
             // Recover from a poisoned mutex instead of panicking so the CLI
@@ -164,22 +228,26 @@ impl OpenAiClient {
     fn call_chat_streaming(&self, req: &ChatRequest) -> Result<String> {
         let url = self.chat_url();
 
-        log::info!("Streaming OpenAI model {:?}", &req.model);
+        log::info!("Streaming {} model {:?}", self.provider_label, req.model);
 
         let t0 = std::time::Instant::now();
         let resp = self
-            .client
-            .post(url)
-            .bearer_auth(&self.api_key)
+            .authed(self.client.post(&url))
             .json(req)
             .send()
-            .context("failed to send streaming request to OpenAI")?;
+            .with_context(|| {
+                format!(
+                    "failed to send streaming request to {} at {}",
+                    self.provider_label, url
+                )
+            })?;
 
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().unwrap_or_default();
             return Err(anyhow!(
-                "OpenAI API error: HTTP {} - {}",
+                "{} API error: HTTP {} - {}",
+                self.provider_label,
                 status.as_u16(),
                 text
             ));
@@ -187,8 +255,95 @@ impl OpenAiClient {
 
         let reader = BufReader::new(resp);
         let result = read_stream_to_string(reader, parse_stream_line);
-        log::debug!("OpenAI streaming response time: {:.2?}", t0.elapsed());
+        log::debug!(
+            "{} streaming response time: {:.2?}",
+            self.provider_label,
+            t0.elapsed()
+        );
         result
+    }
+
+    /// `GET /v1/models/{model}` — OpenAI's retrieve-model endpoint.
+    fn validate_model_by_retrieve(&self) -> Result<()> {
+        let url = self.model_url();
+        let resp = self
+            .authed(self.client.get(&url))
+            .send()
+            .with_context(|| {
+                format!(
+                    "failed to send model validation request to {} at {}",
+                    self.provider_label, url
+                )
+            })?;
+
+        if resp.status() == StatusCode::OK {
+            return Ok(());
+        }
+
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        Err(anyhow!(
+            "{} model validation failed for {:?} at {}: HTTP {} - {}",
+            self.provider_label,
+            self.model,
+            url,
+            status.as_u16(),
+            text
+        ))
+    }
+
+    /// `GET /v1/models` plus a membership check, for servers that list models
+    /// but do not implement retrieve-by-id.
+    fn validate_model_by_list(&self) -> Result<()> {
+        let url = self.models_url();
+        let resp = self
+            .authed(self.client.get(&url))
+            .send()
+            .with_context(|| {
+                format!(
+                    "failed to reach {} at {} — is the server running and reachable?",
+                    self.provider_label, url
+                )
+            })?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().unwrap_or_default();
+            return Err(anyhow!(
+                "{} model listing failed at {}: HTTP {} - {}",
+                self.provider_label,
+                url,
+                status.as_u16(),
+                text
+            ));
+        }
+
+        let listed: ModelListResponse = resp
+            .json()
+            .with_context(|| format!("failed to parse model list from {url}"))?;
+
+        if listed.data.iter().any(|m| m.id == self.model) {
+            return Ok(());
+        }
+
+        let available = listed
+            .data
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        Err(anyhow!(
+            "{} at {} has no model {:?}. Available: {}",
+            self.provider_label,
+            url,
+            self.model,
+            if available.is_empty() {
+                "(none)"
+            } else {
+                &available
+            }
+        ))
     }
 }
 
@@ -212,27 +367,10 @@ fn parse_stream_line(line: &str) -> Result<Option<String>> {
 
 impl LlmClient for OpenAiClient {
     fn validate_model(&self) -> Result<()> {
-        let url = self.model_url();
-        let resp = self
-            .client
-            .get(&url)
-            .bearer_auth(&self.api_key)
-            .send()
-            .context("failed to send model validation request to OpenAI")?;
-
-        if resp.status() == StatusCode::OK {
-            return Ok(());
+        match self.model_validation {
+            ModelValidation::Retrieve => self.validate_model_by_retrieve(),
+            ModelValidation::List => self.validate_model_by_list(),
         }
-
-        let status = resp.status();
-        let text = resp.text().unwrap_or_default();
-        Err(anyhow!(
-            "OpenAI model validation failed for {:?} at {}: HTTP {} - {}",
-            self.model,
-            url,
-            status.as_u16(),
-            text
-        ))
     }
 
     fn summarize_file(
@@ -428,6 +566,73 @@ mod tests {
         assert_eq!(
             client.model_url(),
             "https://api.openai.com/v1/models/gpt-5-nano"
+        );
+    }
+
+    fn lm_studio(base_url: &str) -> OpenAiClient {
+        OpenAiClient::openai_compatible(
+            None,
+            "qwen/qwen3-coder-30b".into(),
+            base_url.into(),
+            false,
+            90,
+            "LM Studio",
+            ModelValidation::List,
+        )
+    }
+
+    #[test]
+    fn builds_lm_studio_urls_from_v1_base() {
+        let client = lm_studio("http://localhost:1234/v1");
+
+        assert_eq!(client.models_url(), "http://localhost:1234/v1/models");
+        assert_eq!(
+            client.chat_url(),
+            "http://localhost:1234/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn builds_lm_studio_urls_from_root_base() {
+        // Given without the /v1 suffix, and with a trailing slash, still lands
+        // on the same paths.
+        let client = lm_studio("http://localhost:1234/");
+
+        assert_eq!(client.models_url(), "http://localhost:1234/v1/models");
+        assert_eq!(
+            client.chat_url(),
+            "http://localhost:1234/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn lm_studio_validates_against_the_model_list() {
+        // LM Studio implements GET /v1/models but not GET /v1/models/{id},
+        // so validation has to go through the listing.
+        assert_eq!(
+            lm_studio("http://localhost:1234/v1").model_validation,
+            ModelValidation::List
+        );
+        assert_eq!(
+            OpenAiClient::new("k".into(), "m".into(), "https://api.openai.com".into(), false, 90)
+                .model_validation,
+            ModelValidation::Retrieve
+        );
+    }
+
+    #[test]
+    fn decodes_model_list_payload() {
+        let body = r#"{"object":"list","data":[
+            {"id":"qwen/qwen3-coder-30b","object":"model","owned_by":"organization_owner"},
+            {"id":"text-embedding-nomic-embed-text-v1.5","object":"model","owned_by":"organization_owner"}
+        ]}"#;
+
+        let parsed: ModelListResponse = serde_json::from_str(body).expect("valid model list");
+        let ids: Vec<&str> = parsed.data.iter().map(|m| m.id.as_str()).collect();
+
+        assert_eq!(
+            ids,
+            ["qwen/qwen3-coder-30b", "text-embedding-nomic-embed-text-v1.5"]
         );
     }
 }

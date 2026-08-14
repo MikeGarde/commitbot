@@ -28,7 +28,7 @@ pub struct Cli {
     #[arg(short = 'k', long, global = true)]
     pub api_key: Option<String>,
 
-    /// LLM provider / API style (openai or ollama)
+    /// LLM provider / API style (openai, ollama, or lmstudio)
     #[arg(long, global = true)]
     pub provider: Option<String>,
 

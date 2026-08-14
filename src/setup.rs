@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use crate::config::Config;
 use crate::llm::LlmClient;
 use crate::llm::ollama::OllamaClient;
-use crate::llm::openai::OpenAiClient;
+use crate::llm::openai::{ModelValidation, OpenAiClient};
 
 /// Build the LLM client based on CLI + config.
 pub fn build_llm_client(cfg: &Config) -> Result<Box<dyn LlmClient>> {
@@ -52,6 +52,33 @@ pub fn build_llm_client(cfg: &Config) -> Result<Box<dyn LlmClient>> {
                 cfg.request_timeout_secs,
             )))
         }
-        other => Err(anyhow!("Unknown provider: {}", other)),
+        "lmstudio" => {
+            let base_url = cfg
+                .base_url
+                .clone()
+                .unwrap_or_else(|| "http://localhost:1234".to_string());
+
+            log::debug!(
+                "Using LM Studio at {} with model: {} (stream={}, timeout={}s)",
+                base_url,
+                cfg.model,
+                cfg.stream,
+                cfg.request_timeout_secs
+            );
+
+            Ok(Box::new(OpenAiClient::openai_compatible(
+                cfg.openai_api_key.clone(),
+                cfg.model.clone(),
+                base_url,
+                cfg.stream,
+                cfg.request_timeout_secs,
+                "LM Studio",
+                ModelValidation::List,
+            )))
+        }
+        other => Err(anyhow!(
+            "Unknown provider: {:?} (expected one of: openai, ollama, lmstudio)",
+            other
+        )),
     }
 }

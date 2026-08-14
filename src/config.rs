@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 /// Final resolved configuration for commitbot.
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// LLM provider (openai, ollama)
+    /// LLM provider (openai, ollama, lmstudio)
     pub provider: String,
     /// OpenAI API key for authentication (sensitive – redacted in logs)
     pub openai_api_key: Option<String>,
@@ -55,13 +55,16 @@ impl Config {
 
         let max_concurrent_requests = r.get_usize("max_concurrent_requests", 4);
         let stream = r.get_bool("stream", true);
-        let request_timeout_secs = r.get_u64("request_timeout_secs", 90);
+        let request_timeout_secs = r.get_u64("request_timeout_secs", 300);
 
         // Cleanup: trim stray quotes if any upstream included them
         let provider = provider.trim_matches('"').to_string();
         let model = model.trim_matches('"').to_string();
         let openai_api_key = openai_api_key.map(|s| s.trim_matches('"').to_string());
-        let base_url = base_url.map(|s| s.trim_matches('"').to_string());
+        // A blank url is the same as no url
+        let base_url = base_url
+            .map(|s| s.trim_matches('"').trim().to_string())
+            .filter(|s| !s.is_empty());
 
         if provider == "openai" && openai_api_key.is_none() {
             return Err(anyhow!(
