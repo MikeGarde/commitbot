@@ -1,6 +1,6 @@
 pub mod ollama;
 pub mod openai;
-mod prompt_builder;
+pub mod prompt_builder;
 mod prompts;
 mod stream;
 

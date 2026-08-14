@@ -1,6 +1,6 @@
 //! Tests for core types and functionality in lib.rs
 
-use commitbot::{FileCategory, FileChange};
+use commitbot::{is_lock_file, FileCategory, FileChange};
 
 #[test]
 fn file_category_str_representation() {
@@ -8,6 +8,30 @@ fn file_category_str_representation() {
     assert_eq!(FileCategory::Supporting.as_str(), "supporting");
     assert_eq!(FileCategory::Consequence.as_str(), "consequence");
     assert_eq!(FileCategory::Ignored.as_str(), "ignored");
+    assert_eq!(FileCategory::Lock.as_str(), "lock");
+}
+
+#[test]
+fn lock_files_are_detected_by_extension() {
+    assert!(is_lock_file("Cargo.lock"));
+    assert!(is_lock_file("yarn.lock"));
+    assert!(is_lock_file("sub/dir/Gemfile.lock"));
+    assert!(is_lock_file("composer.LOCK"));
+
+    // Lock files that do not use the .lock extension.
+    assert!(is_lock_file("package-lock.json"));
+    assert!(is_lock_file("npm-shrinkwrap.json"));
+    assert!(is_lock_file("pnpm-lock.yaml"));
+    assert!(is_lock_file("bun.lockb"));
+    assert!(is_lock_file("packages.lock.json"));
+    assert!(is_lock_file("gradle.lockfile"));
+    assert!(is_lock_file("web/frontend/package-lock.json"));
+
+    assert!(!is_lock_file("Cargo.toml"));
+    assert!(!is_lock_file("package.json"));
+    assert!(!is_lock_file("src/lock.rs"));
+    assert!(!is_lock_file("lock"));
+    assert!(!is_lock_file("locked.json"));
 }
 
 #[test]

@@ -16,13 +16,48 @@ pub use git::{
 };
 pub use llm::LlmClient;
 
-/// How the user categorizes each file in interactive mode.
+/// Lock files whose names don't end in `.lock`, so the extension check misses them.
+const LOCK_FILE_NAMES: &[&str] = &[
+    "package-lock.json",   // npm
+    "npm-shrinkwrap.json", // npm
+    "pnpm-lock.yaml",      // pnpm
+    "bun.lockb",           // bun (pre-1.2 binary format)
+    "packages.lock.json",  // NuGet
+    "gradle.lockfile",     // Gradle
+];
+
+/// True when the path names a dependency lock file: any `*.lock` file, plus the
+/// well-known lock files that use a different extension ([`LOCK_FILE_NAMES`]).
+///
+/// Lock files are regenerated wholesale by a package manager, so their diffs
+/// carry no intent worth asking the LLM about. We skip summarizing them and
+/// only tell the final summary that they were touched.
+pub fn is_lock_file(path: &str) -> bool {
+    let path = std::path::Path::new(path);
+
+    if path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("lock"))
+    {
+        return true;
+    }
+
+    path.file_name().is_some_and(|name| {
+        LOCK_FILE_NAMES
+            .iter()
+            .any(|known| name.eq_ignore_ascii_case(known))
+    })
+}
+
+/// How each file is categorized. The first four come from the user in
+/// interactive mode; `Lock` is assigned automatically by [`is_lock_file`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum FileCategory {
     Main,        // 1
     Supporting,  // 2
     Consequence, // 3
     Ignored,     // 4
+    Lock,        // auto-assigned to *.lock files
 }
 
 impl FileCategory {
@@ -33,6 +68,7 @@ impl FileCategory {
             FileCategory::Supporting => "supporting",
             FileCategory::Consequence => "consequence",
             FileCategory::Ignored => "ignored",
+            FileCategory::Lock => "lock",
         }
     }
 }
@@ -46,6 +82,7 @@ pub struct FileChange {
     pub category: FileCategory,
     /// Git diff for this file
     pub diff: String,
-    /// LLM-generated summary for this file
+    /// LLM-generated summary for this file. Always `None` for
+    /// [`FileCategory::Lock`] and [`FileCategory::Ignored`] files.
     pub summary: Option<String>,
 }
