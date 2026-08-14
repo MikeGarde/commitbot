@@ -14,113 +14,44 @@ on:
         description: Release version (X.Y.Z)
         required: true
         type: string
-  pull_request:
-    types: [closed]
-    branches:
-      - develop
-      - main
 
 permissions:
   actions: write
   contents: write
-  pull-requests: read
 
 concurrency:
-  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.target_branch || github.event.pull_request.base.ref }}
+  group: release-${{ inputs.target_branch }}
   cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
-  MAIN_BASE_VERSION: ${{ vars.MAIN_BASE_VERSION }}
-  DEVELOP_BASE_VERSION: ${{ vars.DEVELOP_BASE_VERSION }}
 
 jobs:
   plan:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     outputs:
-      should_release: ${{ steps.plan.outputs.should_release }}
-      reason: ${{ steps.plan.outputs.reason }}
-      bump: ${{ steps.plan.outputs.bump }}
-      base_version: ${{ steps.plan.outputs.base_version }}
       previous_version: ${{ steps.plan.outputs.previous_version }}
       version: ${{ steps.plan.outputs.version }}
       target_branch: ${{ steps.plan.outputs.target_branch }}
-      source_branch: ${{ steps.plan.outputs.source_branch }}
-      merge_sha: ${{ steps.context.outputs.merge_sha }}
     steps:
       - name: Checkout selected branch
-        if: github.event_name == 'workflow_dispatch'
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.target_branch }}
           fetch-depth: 0
 
-      - name: Checkout merge commit
-        if: github.event_name == 'pull_request'
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
-          fetch-depth: 0
-
       - name: Fetch tags
         run: git fetch --force --tags
-
-      - name: Resolve base versions
-        id: bases
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          current_version="$(
-            sed -nE 's/^version = "([0-9]+\.[0-9]+\.[0-9]+)"/\1/p' Cargo.toml | head -n1
-          )"
-
-          if [[ -z "${current_version}" ]]; then
-            echo "Could not determine the current Cargo version." >&2
-            exit 1
-          fi
-
-          echo "main_base_version=${MAIN_BASE_VERSION:-$current_version}" >> "$GITHUB_OUTPUT"
-          echo "develop_base_version=${DEVELOP_BASE_VERSION:-$current_version}" >> "$GITHUB_OUTPUT"
-
-      - name: Resolve release context
-        id: context
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "target_branch=${{ inputs.target_branch }}" >> "$GITHUB_OUTPUT"
-            echo "source_branch=workflow_dispatch" >> "$GITHUB_OUTPUT"
-            echo "release_version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
-            echo "merge_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          else
-            echo "target_branch=${{ github.event.pull_request.base.ref }}" >> "$GITHUB_OUTPUT"
-            echo "source_branch=${{ github.event.pull_request.head.ref }}" >> "$GITHUB_OUTPUT"
-            echo "release_version=" >> "$GITHUB_OUTPUT"
-            echo "merge_sha=${{ github.event.pull_request.merge_commit_sha }}" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Plan release
         id: plan
         env:
-          TARGET_BRANCH: ${{ steps.context.outputs.target_branch }}
-          SOURCE_BRANCH: ${{ steps.context.outputs.source_branch }}
-          RELEASE_VERSION: ${{ steps.context.outputs.release_version }}
-          MAIN_BASE_VERSION: ${{ steps.bases.outputs.main_base_version }}
-          DEVELOP_BASE_VERSION: ${{ steps.bases.outputs.develop_base_version }}
+          TARGET_BRANCH: ${{ inputs.target_branch }}
+          RELEASE_VERSION: ${{ inputs.version }}
         run: devops/ga-release-plan.sh
-
-      - name: Stop on non-release branches
-        if: steps.plan.outputs.should_release != 'true'
-        shell: bash
-        run: |
-          echo "Skipping release: ${{ steps.plan.outputs.reason }}"
 
   prepare_release:
     needs: plan
-    if: needs.plan.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     outputs:
       release_sha: ${{ steps.release_commit.outputs.release_sha }}
@@ -139,17 +70,6 @@ jobs:
         run: |
           if git rev-parse "refs/tags/${{ needs.plan.outputs.version }}" >/dev/null 2>&1; then
             echo "Tag ${{ needs.plan.outputs.version }} already exists."
-            exit 1
-          fi
-
-      - name: Ensure release commit includes merged change
-        if: github.event_name == 'pull_request'
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if ! git merge-base --is-ancestor "${{ needs.plan.outputs.merge_sha }}" HEAD; then
-            echo "The target branch no longer contains merge commit ${{ needs.plan.outputs.merge_sha }}." >&2
             exit 1
           fi
 
@@ -189,7 +109,6 @@ jobs:
 
   create_release:
     needs: [plan, prepare_release]
-    if: needs.plan.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Check out release commit
@@ -205,7 +124,7 @@ jobs:
           set -euo pipefail
 
           NOTES_ARGS=()
-          if [[ "${{ needs.plan.outputs.previous_version }}" != "${{ needs.plan.outputs.base_version }}" ]]; then
+          if [[ -n "${{ needs.plan.outputs.previous_version }}" ]]; then
             NOTES_ARGS+=(-f previous_tag_name="${{ needs.plan.outputs.previous_version }}")
           fi
 
