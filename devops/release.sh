@@ -123,7 +123,7 @@ if git rev-parse -q --verify "refs/tags/$NEW_VERSION" >/dev/null 2>&1; then
   task setup
   task "build:release:${NEW_VERSION}"
 
-  MAC_ASSETS=("$DIST_DIR"/commitbot-"$NEW_VERSION"-*apple-darwin*.tar.gz)
+  MAC_ASSETS=("$DIST_DIR"/commitbot-"$NEW_VERSION"-*apple-darwin*.gz)
   if [ ${#MAC_ASSETS[@]} -eq 0 ]; then
     echo "Error: no Mac assets found in $DIST_DIR after build."
     exit 1
@@ -212,7 +212,7 @@ if [ ! -d "$DIST_DIR" ]; then
   exit 1
 fi
 
-MAC_ASSETS=("$DIST_DIR"/commitbot-"$NEW_VERSION"-*apple-darwin*.tar.gz)
+MAC_ASSETS=("$DIST_DIR"/commitbot-"$NEW_VERSION"-*apple-darwin*.gz)
 if [ ${#MAC_ASSETS[@]} -eq 0 ]; then
   echo "Error: no Mac assets found in '$DIST_DIR'."
   exit 1

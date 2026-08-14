@@ -5,12 +5,12 @@ set -euo pipefail
 TAG="${1:?usage: publish-if-complete.sh <tag>}"
 
 EXPECTED=(
-  "commitbot-${TAG}-apple-darwin-aarch64.tar.gz"
-  "commitbot-${TAG}-apple-darwin-x86_64.tar.gz"
-  "commitbot-${TAG}-unknown-linux-gnu-aarch64.tar.gz"
-  "commitbot-${TAG}-unknown-linux-gnu-x86_64.tar.gz"
-  "commitbot-${TAG}-unknown-linux-musl-aarch64.tar.gz"
-  "commitbot-${TAG}-unknown-linux-musl-x86_64.tar.gz"
+  "commitbot-${TAG}-apple-darwin-aarch64.gz"
+  "commitbot-${TAG}-apple-darwin-x86_64.gz"
+  "commitbot-${TAG}-unknown-linux-gnu-aarch64.gz"
+  "commitbot-${TAG}-unknown-linux-gnu-x86_64.gz"
+  "commitbot-${TAG}-unknown-linux-musl-aarch64.gz"
+  "commitbot-${TAG}-unknown-linux-musl-x86_64.gz"
   "commitbot-${TAG}-pc-windows-gnu-x86_64.zip"
 )
 
