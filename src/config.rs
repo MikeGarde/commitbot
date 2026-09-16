@@ -66,7 +66,12 @@ impl Config {
             .map(|s| s.trim_matches('"').trim().to_string())
             .filter(|s| !s.is_empty());
 
-        if provider == "openai" && openai_api_key.is_none() {
+        let is_custom_endpoint = base_url
+            .as_deref()
+            .map(|u| !u.starts_with("https://api.openai.com"))
+            .unwrap_or(false);
+
+        if provider == "openai" && openai_api_key.is_none() && !is_custom_endpoint {
             return Err(anyhow!(
                 "OPENAI_API_KEY must be set via CLI, env var, or config file for provider=openai"
             ));

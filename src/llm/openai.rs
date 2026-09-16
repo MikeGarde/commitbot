@@ -27,6 +27,7 @@ struct ChatMessage {
 
 #[derive(Deserialize)]
 struct ChatResponse {
+    #[serde(default)]
     choices: Vec<ChatChoice>,
     usage: Option<ChatUsage>,
 }
@@ -38,18 +39,25 @@ struct ChatChoice {
 
 #[derive(Deserialize)]
 struct ChatMessageResponse {
-    content: String,
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    reasoning_content: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct ChatUsage {
+    #[serde(default)]
     prompt_tokens: u32,
+    #[serde(default)]
     completion_tokens: u32,
+    #[serde(default)]
     total_tokens: u32,
 }
 
 #[derive(Deserialize)]
 struct ModelListResponse {
+    #[serde(default)]
     data: Vec<ModelListEntry>,
 }
 
@@ -60,6 +68,7 @@ struct ModelListEntry {
 
 #[derive(Deserialize)]
 struct StreamResponse {
+    #[serde(default)]
     choices: Vec<StreamChoice>,
 }
 
@@ -70,7 +79,11 @@ struct StreamChoice {
 
 #[derive(Deserialize)]
 struct StreamDelta {
+    #[serde(default)]
     content: Option<String>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    reasoning_content: Option<String>,
 }
 
 /// How to confirm the configured model exists on the upstream server.
@@ -138,7 +151,7 @@ impl OpenAiClient {
             client,
             api_key,
             model,
-            api_base_url: api_base_url.trim_end_matches('/').to_string(),
+            api_base_url: normalize_base_url(&api_base_url),
             stream,
             provider_label: provider_label.into(),
             model_validation,
@@ -155,13 +168,9 @@ impl OpenAiClient {
         }
     }
 
-    /// Join `path` under `/v1`, tolerating a base URL that already ends in `/v1`.
+    /// Join `path` under `/v1`, with base URL guaranteed normalized.
     fn v1_url(&self, path: &str) -> String {
-        if self.api_base_url.ends_with("/v1") {
-            format!("{}/{}", self.api_base_url, path)
-        } else {
-            format!("{}/v1/{}", self.api_base_url, path)
-        }
+        format!("{}/v1/{}", self.api_base_url, path.trim_start_matches('/'))
     }
 
     fn chat_url(&self) -> String {
@@ -210,8 +219,19 @@ impl OpenAiClient {
         let content = chat_resp
             .choices
             .first()
-            .map(|c| c.message.content.clone())
-            .ok_or_else(|| anyhow!("no choices returned from {}", self.provider_label))?;
+            .and_then(|c| {
+                c.message
+                    .content
+                    .clone()
+                    .filter(|s| !s.trim().is_empty())
+                    .or_else(|| {
+                        c.message
+                            .reasoning_content
+                            .clone()
+                            .filter(|s| !s.trim().is_empty())
+                    })
+            })
+            .ok_or_else(|| anyhow!("no content returned from {}", self.provider_label))?;
 
         if let Some(usage) = &chat_resp.usage {
             // Recover from a poisoned mutex instead of panicking so the CLI
@@ -318,11 +338,30 @@ impl OpenAiClient {
             ));
         }
 
-        let listed: ModelListResponse = resp
-            .json()
-            .with_context(|| format!("failed to parse model list from {url}"))?;
+        let listed: ModelListResponse = match resp.json() {
+            Ok(l) => l,
+            Err(e) => {
+                log::warn!(
+                    "{} model listing at {} could not be parsed: {}. Proceeding anyway...",
+                    self.provider_label,
+                    url,
+                    e
+                );
+                return Ok(());
+            }
+        };
 
-        if listed.data.iter().any(|m| m.id == self.model) {
+        if listed.data.is_empty() {
+            log::warn!(
+                "{} at {} returned an empty model list; proceeding with {:?}",
+                self.provider_label,
+                url,
+                self.model
+            );
+            return Ok(());
+        }
+
+        if listed.data.iter().any(|m| matches_model_id(&self.model, &m.id)) {
             return Ok(());
         }
 
@@ -347,6 +386,60 @@ impl OpenAiClient {
     }
 }
 
+/// Normalizes any variation of base URL (e.g. `http://host:1234`, `http://host:1234/v1`,
+/// `http://host:1234/V1/`, `http://host:1234/api/v1`, `http://host:1234/v1/chat/completions`)
+/// down to the base origin so that `v1_url` can deterministically append `/v1/{path}`.
+pub fn normalize_base_url(raw: &str) -> String {
+    let mut url = raw.trim().trim_end_matches('/').to_string();
+
+    if url.to_ascii_lowercase().ends_with("/chat/completions") {
+        url = url[..url.len() - "/chat/completions".len()]
+            .trim_end_matches('/')
+            .to_string();
+    } else if url.to_ascii_lowercase().ends_with("/models") {
+        url = url[..url.len() - "/models".len()]
+            .trim_end_matches('/')
+            .to_string();
+    }
+
+    if url.to_ascii_lowercase().ends_with("/api/v1") {
+        url = url[..url.len() - "/api/v1".len()]
+            .trim_end_matches('/')
+            .to_string();
+    } else if url.to_ascii_lowercase().ends_with("/v1") {
+        url = url[..url.len() - "/v1".len()]
+            .trim_end_matches('/')
+            .to_string();
+    }
+
+    url
+}
+
+fn clean_model_name(s: &str) -> &str {
+    let without_gguf = s.strip_suffix(".gguf").unwrap_or(s);
+    without_gguf.split(':').next().unwrap_or(without_gguf)
+}
+
+/// Check if a model candidate string from the server matches the configured model name.
+/// Handles exact match, case-insensitivity, repo prefixes (e.g. "google/gemma-4-12b-qat" vs "gemma-4-12b-qat"),
+/// and stripping file extensions like ".gguf" or tags like ":latest".
+pub fn matches_model_id(configured: &str, candidate: &str) -> bool {
+    if configured == candidate {
+        return true;
+    }
+    if configured.eq_ignore_ascii_case(candidate) {
+        return true;
+    }
+    let conf_base = configured.rsplit('/').next().unwrap_or(configured);
+    let cand_base = candidate.rsplit('/').next().unwrap_or(candidate);
+    if conf_base.eq_ignore_ascii_case(cand_base) {
+        return true;
+    }
+    let conf_clean = clean_model_name(conf_base);
+    let cand_clean = clean_model_name(cand_base);
+    conf_clean.eq_ignore_ascii_case(cand_clean)
+}
+
 fn parse_stream_line(line: &str) -> Result<Option<String>> {
     let line = line.trim_start();
     if !line.starts_with("data:") {
@@ -368,8 +461,40 @@ fn parse_stream_line(line: &str) -> Result<Option<String>> {
 impl LlmClient for OpenAiClient {
     fn validate_model(&self) -> Result<()> {
         match self.model_validation {
-            ModelValidation::Retrieve => self.validate_model_by_retrieve(),
-            ModelValidation::List => self.validate_model_by_list(),
+            ModelValidation::Retrieve => match self.validate_model_by_retrieve() {
+                Ok(()) => Ok(()),
+                Err(e) => {
+                    log::debug!(
+                        "Retrieve model validation failed: {e}. Falling back to list validation."
+                    );
+                    if let Ok(()) = self.validate_model_by_list() {
+                        return Ok(());
+                    }
+                    if self.provider_label != "OpenAI" {
+                        log::warn!(
+                            "Could not validate model {:?} on {}: {}. Proceeding anyway...",
+                            self.model,
+                            self.provider_label,
+                            e
+                        );
+                        Ok(())
+                    } else {
+                        Err(e)
+                    }
+                }
+            },
+            ModelValidation::List => match self.validate_model_by_list() {
+                Ok(()) => Ok(()),
+                Err(e) => {
+                    log::debug!(
+                        "List model validation failed: {e}. Falling back to retrieve validation."
+                    );
+                    if let Ok(()) = self.validate_model_by_retrieve() {
+                        return Ok(());
+                    }
+                    Err(e)
+                }
+            },
         }
     }
 
@@ -618,6 +743,120 @@ mod tests {
                 .model_validation,
             ModelValidation::Retrieve
         );
+    }
+
+    #[test]
+    fn builds_lm_studio_urls_from_uppercase_v1_base() {
+        let client = lm_studio("http://gpu.garde.one:1234/V1/");
+
+        assert_eq!(client.models_url(), "http://gpu.garde.one:1234/v1/models");
+        assert_eq!(
+            client.chat_url(),
+            "http://gpu.garde.one:1234/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn builds_lm_studio_urls_from_api_v1_base() {
+        let client = lm_studio("http://localhost:1234/api/v1");
+
+        assert_eq!(client.models_url(), "http://localhost:1234/v1/models");
+        assert_eq!(
+            client.chat_url(),
+            "http://localhost:1234/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn builds_lm_studio_urls_from_full_endpoint() {
+        let client = lm_studio("http://localhost:1234/v1/chat/completions");
+
+        assert_eq!(client.models_url(), "http://localhost:1234/v1/models");
+        assert_eq!(
+            client.chat_url(),
+            "http://localhost:1234/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn matches_model_id_variations() {
+        assert!(matches_model_id(
+            "google/gemma-4-12b-qat",
+            "google/gemma-4-12b-qat"
+        ));
+        assert!(matches_model_id(
+            "google/gemma-4-12b-qat",
+            "GOOGLE/GEMMA-4-12B-QAT"
+        ));
+        assert!(matches_model_id(
+            "gemma-4-12b-qat",
+            "google/gemma-4-12b-qat"
+        ));
+        assert!(matches_model_id(
+            "google/gemma-4-12b-qat",
+            "gemma-4-12b-qat"
+        ));
+        assert!(matches_model_id(
+            "gemma-4-12b-qat",
+            "google/gemma-4-12b-qat.gguf"
+        ));
+        assert!(matches_model_id(
+            "gemma-4-12b-qat",
+            "google/gemma-4-12b-qat:latest"
+        ));
+        assert!(!matches_model_id(
+            "gemma-4-12b-qat",
+            "ibm/granite-4-h-tiny"
+        ));
+    }
+
+    #[test]
+    fn decodes_chat_response_with_null_content_and_reasoning() {
+        let body = r#"{
+            "id": "chatcmpl-test",
+            "object": "chat.completion",
+            "created": 123456,
+            "model": "google/gemma-4-12b-qat",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "reasoning_content": "Just thinking..."
+                    },
+                    "finish_reason": "stop"
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15
+            }
+        }"#;
+
+        let parsed: ChatResponse = serde_json::from_str(body).expect("valid chat response");
+        let choice = parsed.choices.first().expect("choice present");
+        assert_eq!(choice.message.content, None);
+        assert_eq!(
+            choice.message.reasoning_content.as_deref(),
+            Some("Just thinking...")
+        );
+    }
+
+    #[test]
+    fn decodes_streaming_chunk_with_reasoning_and_no_content() {
+        let line = r#"data: {"id":"c","choices":[{"index":0,"delta":{"reasoning_content":"thought"}}]}"#;
+        let res = parse_stream_line(line).expect("valid stream line");
+        assert_eq!(res, None);
+
+        let line_content = r#"data: {"id":"c","choices":[{"index":0,"delta":{"content":"word"}}]}"#;
+        let res_content = parse_stream_line(line_content).expect("valid stream line");
+        assert_eq!(res_content, Some("word".to_string()));
+
+        let line_done = "data: [DONE]";
+        let res_done = parse_stream_line(line_done).expect("valid stream line");
+        assert_eq!(res_done, None);
     }
 
     #[test]

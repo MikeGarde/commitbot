@@ -1,7 +1,7 @@
 use commitbot::git::{
-    find_first_pr_number, format_pr_commit_appendix_with_remote, parse_remote_repo,
-    short_commit_hash, split_diff_by_file, staged_diff_for_file, staged_files, PrItem,
-    PrSummaryMode,
+    find_first_pr_number, format_git_error, format_pr_commit_appendix_with_remote,
+    parse_remote_repo, short_commit_hash, split_diff_by_file, staged_diff_for_file, staged_files,
+    PrItem, PrSummaryMode,
 };
 use std::process::Command;
 
@@ -12,12 +12,16 @@ fn repo_with_staged_nested_file() -> (tempfile::TempDir, std::path::PathBuf) {
     let root = dir.path();
 
     let run = |args: &[&str]| {
-        let status = Command::new("git")
+        let output = Command::new("git")
             .args(args)
             .current_dir(root)
-            .status()
+            .output()
             .expect("run git");
-        assert!(status.success(), "git {:?} failed", args);
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let err = format_git_error(args, output.status.code(), &stderr);
+            panic!("{err}");
+        }
     };
 
     run(&["init", "-q"]);
@@ -197,4 +201,38 @@ fn staged_diff_for_file_works_from_subdirectory() {
 fn pr_summary_mode_as_str() {
     assert_eq!(PrSummaryMode::ByCommits.as_str(), "commits");
     assert_eq!(PrSummaryMode::ByPrs.as_str(), "prs");
+}
+
+#[test]
+fn format_git_error_detects_xcode_license_error() {
+    let stderr = "You have not agreed to the Xcode license agreements. Please run 'sudo xcodebuild -license' from within a Terminal window to review and agree to the Xcode and Apple SDKs license.";
+    let err = format_git_error(&["rev-parse", "--abbrev-ref", "HEAD"], Some(69), stderr);
+    let msg = err.to_string();
+    assert!(msg.contains("Xcode license agreement required"));
+    assert!(msg.contains("sudo xcodebuild -license"));
+}
+
+#[test]
+fn format_git_error_legacy_xcode_license_error() {
+    let stderr = "Agreeing to the Xcode/iOS license requires admin privileges, please run 'sudo xcodebuild -license' and then retry this command.";
+    let err = format_git_error(&["diff", "--cached"], Some(69), stderr);
+    let msg = err.to_string();
+    assert!(msg.contains("Xcode license agreement required"));
+    assert!(msg.contains("sudo xcodebuild -license"));
+}
+
+#[test]
+fn format_git_error_standard_git_error() {
+    let stderr = "fatal: not a git repository (or any of the parent directories): .git";
+    let err = format_git_error(&["status"], Some(128), stderr);
+    let msg = err.to_string();
+    assert!(msg.contains("git [\"status\"] exited with status Some(128)"));
+    assert!(msg.contains("fatal: not a git repository"));
+}
+
+#[test]
+fn format_git_error_empty_stderr() {
+    let err = format_git_error(&["status"], Some(1), "");
+    let msg = err.to_string();
+    assert_eq!(msg, "git [\"status\"] exited with status Some(1)");
 }
