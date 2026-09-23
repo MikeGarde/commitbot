@@ -8,14 +8,17 @@ use crate::llm::openai::{ModelValidation, OpenAiClient};
 pub fn build_llm_client(cfg: &Config) -> Result<Box<dyn LlmClient>> {
     match cfg.provider.as_str() {
         "openai" => {
-            let key = cfg
-                .openai_api_key
-                .clone()
-                .ok_or_else(|| anyhow!("OPENAI_API_KEY must be set for provider=openai"))?;
             let base_url = cfg
                 .base_url
                 .clone()
                 .unwrap_or_else(|| "https://api.openai.com".to_string());
+
+            let is_custom_endpoint = !base_url.starts_with("https://api.openai.com");
+            let validation = if is_custom_endpoint {
+                ModelValidation::List
+            } else {
+                ModelValidation::Retrieve
+            };
 
             log::debug!(
                 "Using OpenAiClient with model: {} (stream={}, timeout={}s)",
@@ -24,12 +27,14 @@ pub fn build_llm_client(cfg: &Config) -> Result<Box<dyn LlmClient>> {
                 cfg.request_timeout_secs
             );
 
-            Ok(Box::new(OpenAiClient::new(
-                key,
+            Ok(Box::new(OpenAiClient::openai_compatible(
+                cfg.openai_api_key.clone(),
                 cfg.model.clone(),
                 base_url,
                 cfg.stream,
                 cfg.request_timeout_secs,
+                "OpenAI",
+                validation,
             )))
         }
         "ollama" => {

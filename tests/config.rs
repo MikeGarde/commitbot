@@ -190,3 +190,29 @@ model = "gpt-5-nano"
 
     fs::remove_file(config_path).ok();
 }
+
+#[test]
+fn custom_openai_endpoint_needs_no_api_key() {
+    let config_path = write_temp_config(
+        "custom_openai",
+        r#"
+[default]
+provider = "openai"
+model = "local-model"
+url = "http://192.168.1.16:1234/v1"
+"#,
+    );
+
+    let cli = Cli::parse_from([
+        "commitbot",
+        "--config",
+        config_path.to_str().expect("utf-8 path"),
+    ]);
+
+    let cfg = Config::from_sources(&cli).expect("custom openai endpoint should allow no api key");
+    assert_eq!(cfg.provider, "openai");
+    assert_eq!(cfg.openai_api_key, None);
+    assert_eq!(cfg.base_url.as_deref(), Some("http://192.168.1.16:1234/v1"));
+
+    fs::remove_file(config_path).ok();
+}

@@ -25,7 +25,8 @@ max_concurrent_requests = 8
 ["MikeGarde/commitbot"]
 provider = "lmstudio"
 model = "google/gemma-4-12b-qat"
-url = "http://GPU.localdomain:1234/v1"
+url = "http://gpu.garde.one:1234/v1"
+# Fallback / direct IP: url = "http://192.168.1.16:1234/v1"
 max_concurrent_requests = 2
 
 
