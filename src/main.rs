@@ -285,13 +285,13 @@ fn read_diff_arg(diff_arg: &str) -> Result<String> {
     }
 }
 
+/// Branch name paired with a list of (file path, diff) pairs.
+type BranchDiffs = (String, Vec<(String, String)>);
+
 /// Load per-file diffs from `--diff <diff_arg>`, splitting a combined diff
 /// into (path, diff) pairs. Returns `None` when the resolved content is
 /// empty (already reported to the user).
-fn load_external_diff(
-    cli: &Cli,
-    diff_arg: &str,
-) -> Result<Option<(String, Vec<(String, String)>)>> {
+fn load_external_diff(cli: &Cli, diff_arg: &str) -> Result<Option<BranchDiffs>> {
     let combined = read_diff_arg(diff_arg)?;
     if combined.trim().is_empty() {
         println!("No diff content found.");
