@@ -24,6 +24,10 @@ pub struct Config {
     pub stream: bool,
     /// HTTP request timeout in seconds for LLM calls
     pub request_timeout_secs: u64,
+    /// Maximum size (in bytes) of a single file's diff sent to the LLM.
+    /// Larger diffs (e.g. notebooks with embedded base64 output, minified
+    /// bundles) are truncated to avoid exceeding the model's context window.
+    pub max_diff_bytes: usize,
 }
 
 impl Config {
@@ -56,6 +60,7 @@ impl Config {
         let max_concurrent_requests = r.get_usize("max_concurrent_requests", 4);
         let stream = r.get_bool("stream", true);
         let request_timeout_secs = r.get_u64("request_timeout_secs", 300);
+        let max_diff_bytes = r.get_usize("max_diff_bytes", 20_000);
 
         // Cleanup: trim stray quotes if any upstream included them
         let provider = provider.trim_matches('"').to_string();
@@ -85,6 +90,7 @@ impl Config {
             max_concurrent_requests,
             stream,
             request_timeout_secs,
+            max_diff_bytes,
         })
     }
 }
@@ -99,6 +105,7 @@ struct FileConfig {
     pub max_concurrent_requests: Option<usize>,
     pub stream: Option<bool>,
     pub request_timeout_secs: Option<u64>,
+    pub max_diff_bytes: Option<usize>,
 }
 
 /// Root of the TOML file:
@@ -183,6 +190,7 @@ impl<'a> ConfigResolver<'a> {
             "max_concurrent_requests" => Some("COMMITBOT_MAX_CONCURRENT_REQUESTS"),
             "stream" => Some("COMMITBOT_STREAM"),
             "request_timeout_secs" => Some("COMMITBOT_REQUEST_TIMEOUT_SECS"),
+            "max_diff_bytes" => Some("COMMITBOT_MAX_DIFF_BYTES"),
             _ => None,
         }
     }
@@ -212,6 +220,7 @@ impl<'a> ConfigResolver<'a> {
         };
         match key {
             "max_concurrent_requests" => cfg.max_concurrent_requests,
+            "max_diff_bytes" => cfg.max_diff_bytes,
             _ => None,
         }
     }

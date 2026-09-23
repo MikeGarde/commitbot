@@ -2,8 +2,8 @@ use anyhow::{anyhow, Result};
 use clap::Parser;
 use commitbot::config::Config;
 use commitbot::git::{
-    collect_pr_items, current_branch, format_pr_commit_appendix, split_diff_by_file,
-    staged_diff_for_file, staged_files, PrSummaryMode,
+    collect_pr_items, current_branch, format_pr_commit_appendix, looks_like_commit_hash,
+    resolve_commit_diff, split_diff_by_file, staged_diff_for_file, staged_files, PrSummaryMode,
 };
 use commitbot::llm::LlmClient;
 use commitbot::{Cli, Command, FileCategory, FileChange};
@@ -256,29 +256,64 @@ fn summarize_files_concurrently(
     Ok(())
 }
 
+/// Read the content behind `--diff <diff_arg>`.
+///
+/// `-` reads stdin. Otherwise, if the argument looks like a commit hash, we
+/// first try to resolve it against git history; if that doesn't find a
+/// commit, or the argument didn't look like a hash to begin with, we fall
+/// back to treating it as a file path.
+fn read_diff_arg(diff_arg: &str) -> Result<String> {
+    if diff_arg == "-" {
+        let mut buf = String::new();
+        io::stdin().read_to_string(&mut buf)?;
+        return Ok(buf);
+    }
+
+    if looks_like_commit_hash(diff_arg) && let Some(diff) = resolve_commit_diff(diff_arg)? {
+        return Ok(diff);
+    }
+
+    let path = std::path::Path::new(diff_arg);
+    if path.is_file() {
+        std::fs::read_to_string(path)
+            .map_err(|e| anyhow!("Failed to read diff file '{}': {}", diff_arg, e))
+    } else {
+        Err(anyhow!(
+            "'{}' is not a known commit hash or an existing file.",
+            diff_arg
+        ))
+    }
+}
+
+/// Load per-file diffs from `--diff <diff_arg>`, splitting a combined diff
+/// into (path, diff) pairs. Returns `None` when the resolved content is
+/// empty (already reported to the user).
+fn load_external_diff(
+    cli: &Cli,
+    diff_arg: &str,
+) -> Result<Option<(String, Vec<(String, String)>)>> {
+    let combined = read_diff_arg(diff_arg)?;
+    if combined.trim().is_empty() {
+        println!("No diff content found.");
+        return Ok(None);
+    }
+    let mut per_file = split_diff_by_file(&combined);
+    if per_file.is_empty() {
+        per_file = vec![("(diff)".to_string(), combined)];
+    }
+    let branch = cli
+        .branch
+        .clone()
+        .unwrap_or_else(|| current_branch().unwrap_or_else(|_| "unknown-branch".to_string()));
+    Ok(Some((branch, per_file)))
+}
+
 fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     let (branch, file_pairs) = if let Some(ref diff_arg) = cli.diff {
-        let combined = if diff_arg == "-" {
-            let mut buf = String::new();
-            io::stdin().read_to_string(&mut buf)?;
-            buf
-        } else {
-            std::fs::read_to_string(diff_arg)
-                .map_err(|e| anyhow!("Failed to read diff file '{}': {}", diff_arg, e))?
-        };
-        if combined.trim().is_empty() {
-            println!("No diff content found.");
-            return Ok(());
+        match load_external_diff(cli, diff_arg)? {
+            Some(pair) => pair,
+            None => return Ok(()),
         }
-        let mut per_file = split_diff_by_file(&combined);
-        if per_file.is_empty() {
-            per_file = vec![("(diff)".to_string(), combined)];
-        }
-        let branch = cli
-            .branch
-            .clone()
-            .unwrap_or_else(|| current_branch().unwrap_or_else(|_| "unknown-branch".to_string()));
-        (branch, per_file)
     } else {
         let branch = current_branch()?;
         let files = staged_files()?;
@@ -314,7 +349,7 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
         file_changes.push(FileChange {
             path,
             category,
-            diff,
+            diff: commitbot::truncate_diff(&diff, cfg.max_diff_bytes),
             summary: None,
         });
     }
@@ -424,28 +459,10 @@ fn run_auto(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     let using_external_diff = cli.diff.is_some();
     let (branch, file_pairs): (String, Vec<(String, String)>) =
         if let Some(ref diff_arg) = cli.diff {
-            let combined = if diff_arg == "-" {
-                let mut buf = String::new();
-                io::stdin().read_to_string(&mut buf)?;
-                buf
-            } else {
-                std::fs::read_to_string(diff_arg)
-                    .map_err(|e| anyhow!("Failed to read diff file '{}': {}", diff_arg, e))?
-            };
-
-            if combined.trim().is_empty() {
-                println!("No diff content found.");
-                return Ok(());
+            match load_external_diff(cli, diff_arg)? {
+                Some(pair) => pair,
+                None => return Ok(()),
             }
-
-            let mut per_file = split_diff_by_file(&combined);
-            if per_file.is_empty() {
-                per_file = vec![("(diff)".to_string(), combined)];
-            }
-            let branch = cli.branch.clone().unwrap_or_else(|| {
-                current_branch().unwrap_or_else(|_| "unknown-branch".to_string())
-            });
-            (branch, per_file)
         } else {
             let branch = current_branch()?;
             let files = staged_files()?;
@@ -474,7 +491,7 @@ fn run_auto(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
             FileChange {
                 path,
                 category,
-                diff,
+                diff: commitbot::truncate_diff(&diff, cfg.max_diff_bytes),
                 summary: None,
             }
         })

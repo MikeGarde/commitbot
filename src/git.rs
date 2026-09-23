@@ -83,7 +83,25 @@ impl RemoteRepo {
     }
 }
 
-/// Run a git command and capture stdout as String.
+pub fn format_git_error(args: &[&str], code: Option<i32>, stderr: &str) -> anyhow::Error {
+    let stderr = stderr.trim();
+
+    if stderr.contains("xcodebuild -license") || stderr.contains("Xcode license") {
+        return anyhow!(
+            "Xcode license agreement required.\n\
+             Apple's git cannot run until the Xcode / Command Line Tools license is accepted.\n\n\
+             Please run:\n    sudo xcodebuild -license\n\n\
+             Once accepted, run commitbot again."
+        );
+    }
+
+    if stderr.is_empty() {
+        anyhow!("git {:?} exited with status {:?}", args, code)
+    } else {
+        anyhow!("git {:?} exited with status {:?}: {}", args, code, stderr)
+    }
+}
+
 pub fn git_output(args: &[&str]) -> Result<String> {
     let output = GitCommand::new("git")
         .args(args)
@@ -92,20 +110,7 @@ pub fn git_output(args: &[&str]) -> Result<String> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let stderr = stderr.trim();
-        if stderr.is_empty() {
-            return Err(anyhow!(
-                "git {:?} exited with status {:?}",
-                args,
-                output.status.code()
-            ));
-        }
-        return Err(anyhow!(
-            "git {:?} exited with status {:?}: {}",
-            args,
-            output.status.code(),
-            stderr
-        ));
+        return Err(format_git_error(args, output.status.code(), &stderr));
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -127,7 +132,6 @@ fn remote_origin_url() -> Option<String> {
         .filter(|url| !url.is_empty())
 }
 
-/// Get the current branch name.
 pub fn current_branch() -> Result<String> {
     let name = git_output(&["rev-parse", "--abbrev-ref", "HEAD"])?
         .trim()
@@ -135,7 +139,25 @@ pub fn current_branch() -> Result<String> {
     Ok(name)
 }
 
-/// Get a list of staged files.
+pub fn looks_like_commit_hash(s: &str) -> bool {
+    let len = s.len();
+    (4..=40).contains(&len) && s.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+pub fn resolve_commit_diff(hash: &str) -> Result<Option<String>> {
+    let verified = GitCommand::new("git")
+        .args(["rev-parse", "--verify", "--quiet", &format!("{hash}^{{commit}}")])
+        .output()
+        .with_context(|| format!("failed to run git rev-parse for '{hash}'"))?;
+
+    if !verified.status.success() {
+        return Ok(None);
+    }
+
+    let diff = git_output(&["show", "--format=", hash])?;
+    Ok(Some(diff))
+}
+
 pub fn staged_files() -> Result<Vec<String>> {
     let output = git_output(&["diff", "--cached", "--name-only"])?;
     let files = output

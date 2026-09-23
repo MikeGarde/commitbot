@@ -1,9 +1,14 @@
 use commitbot::git::{
     find_first_pr_number, format_git_error, format_pr_commit_appendix_with_remote,
-    parse_remote_repo, short_commit_hash, split_diff_by_file, staged_diff_for_file, staged_files,
-    PrItem, PrSummaryMode,
+    looks_like_commit_hash, parse_remote_repo, resolve_commit_diff, short_commit_hash,
+    split_diff_by_file, staged_diff_for_file, staged_files, PrItem, PrSummaryMode,
 };
 use std::process::Command;
+use std::sync::Mutex;
+
+/// `std::env::set_current_dir` changes process-wide state, so tests that use
+/// it must not run concurrently with each other.
+static CWD_LOCK: Mutex<()> = Mutex::new(());
 
 /// Set up a throwaway git repo with a staged change in a nested file, and
 /// return its tempdir handle plus the nested directory's path.
@@ -176,6 +181,7 @@ fn short_commit_hash_short_input() {
 
 #[test]
 fn staged_diff_for_file_works_from_subdirectory() {
+    let _guard = CWD_LOCK.lock().expect("cwd lock");
     let (_dir, nested_dir) = repo_with_staged_nested_file();
 
     let original_cwd = std::env::current_dir().expect("current dir");
@@ -228,6 +234,58 @@ fn format_git_error_standard_git_error() {
     let msg = err.to_string();
     assert!(msg.contains("git [\"status\"] exited with status Some(128)"));
     assert!(msg.contains("fatal: not a git repository"));
+}
+
+#[test]
+fn looks_like_commit_hash_accepts_hex_strings_in_range() {
+    assert!(looks_like_commit_hash("a5484b6"));
+    assert!(looks_like_commit_hash("a5484b6ce03e4f1503c7a0fdda7c120bf73c8bc"));
+    assert!(looks_like_commit_hash("dead"));
+}
+
+#[test]
+fn looks_like_commit_hash_rejects_non_hex_or_bad_length() {
+    assert!(!looks_like_commit_hash("abc")); // too short
+    assert!(!looks_like_commit_hash("my-changes.diff")); // not hex
+    assert!(!looks_like_commit_hash("-")); // stdin marker
+    assert!(!looks_like_commit_hash(
+        "a5484b6ce03e4f1503c7a0fdda7c120bf73c8bcaa" // too long
+    ));
+}
+
+#[test]
+fn resolve_commit_diff_finds_existing_commit() {
+    let _guard = CWD_LOCK.lock().expect("cwd lock");
+    let (_dir, nested_dir) = repo_with_staged_nested_file();
+
+    let original_cwd = std::env::current_dir().expect("current dir");
+    std::env::set_current_dir(&nested_dir).expect("chdir into nested dir");
+
+    let result = (|| {
+        let hash = commitbot::git::git_output(&["rev-parse", "HEAD"])?
+            .trim()
+            .to_string();
+        let diff = resolve_commit_diff(&hash)?.expect("commit should resolve");
+        assert!(diff.contains("OrderItem.php"));
+        anyhow::Ok(())
+    })();
+
+    std::env::set_current_dir(original_cwd).expect("restore cwd");
+    result.expect("resolve_commit_diff for existing commit");
+}
+
+#[test]
+fn resolve_commit_diff_returns_none_for_unknown_hash() {
+    let _guard = CWD_LOCK.lock().expect("cwd lock");
+    let (_dir, nested_dir) = repo_with_staged_nested_file();
+
+    let original_cwd = std::env::current_dir().expect("current dir");
+    std::env::set_current_dir(&nested_dir).expect("chdir into nested dir");
+
+    let result = resolve_commit_diff("deadbeef");
+
+    std::env::set_current_dir(original_cwd).expect("restore cwd");
+    assert_eq!(result.expect("should not error"), None);
 }
 
 #[test]

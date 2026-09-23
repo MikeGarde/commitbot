@@ -84,9 +84,18 @@ commitbot --diff my-changes.diff
 # With a custom branch name for context
 commitbot --diff my-changes.diff --branch feature/ISSUE-123-auth
 
-# From stdin (pipe a diff)
+# From stdin (pipe a diff)task :
 git diff HEAD~3 | commitbot --diff -
+
+# From a commit hash (looked up in git history automatically)
+commitbot --diff aabcf3b6ce03e4f1503c7a0fdda7c120bf73c8bc
 ```
+
+When `--diff` looks like a commit hash, Commitbot first checks whether it
+exists in the current repo's history and, if so, summarizes the diff
+introduced by that commit. If it doesn't match a commit, Commitbot falls
+back to treating the value as a file path; if neither a matching commit nor
+a file is found, it reports an error instead of guessing.
 
 ---
 
