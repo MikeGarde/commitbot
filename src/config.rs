@@ -28,6 +28,12 @@ pub struct Config {
     /// Larger diffs (e.g. notebooks with embedded base64 output, minified
     /// bundles) are truncated to avoid exceeding the model's context window.
     pub max_diff_bytes: usize,
+    /// `--oneline` was passed (in either mode): emit a one-line summary
+    /// (message + LLM stats, newlines escaped as `\n`) after generation.
+    pub oneline: bool,
+    /// `--oneline quiet`: suppress the normal readable output (including
+    /// live streaming) and only emit the one-line summary.
+    pub oneline_quiet: bool,
 }
 
 impl Config {
@@ -62,6 +68,11 @@ impl Config {
         let request_timeout_secs = r.get_u64("request_timeout_secs", 300);
         let max_diff_bytes = r.get_usize("max_diff_bytes", 20_000);
 
+        // CLI-only: not sourced from env/file, since it controls this
+        // process's own stdout shape rather than provider behavior.
+        let oneline = cli.oneline.is_some();
+        let oneline_quiet = cli.oneline.as_deref() == Some("quiet");
+
         // Cleanup: trim stray quotes if any upstream included them
         let provider = provider.trim_matches('"').to_string();
         let model = model.trim_matches('"').to_string();
@@ -91,6 +102,8 @@ impl Config {
             stream,
             request_timeout_secs,
             max_diff_bytes,
+            oneline,
+            oneline_quiet,
         })
     }
 }

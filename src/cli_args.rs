@@ -50,6 +50,21 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub no_stream: bool,
 
+    /// Also emit a single-line version of the generated message (with the
+    /// LLM stats appended), suitable for worktree/scripted commits.
+    ///
+    /// Pass with no value to keep the normal readable output and print the
+    /// one-line summary afterward. Pass `--oneline quiet` to suppress the
+    /// normal readable output entirely and print only the one-line summary.
+    #[arg(
+        long,
+        global = true,
+        value_name = "MODE",
+        num_args = 0..=1,
+        default_missing_value = "readable"
+    )]
+    pub oneline: Option<String>,
+
     /// Increase verbosity (-v, -vv, -vvv)
     #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
     pub verbose: u8,
