@@ -32,6 +32,7 @@ pub fn build_llm_client(cfg: &Config) -> Result<Box<dyn LlmClient>> {
                 cfg.model.clone(),
                 base_url,
                 cfg.stream,
+                cfg.oneline_quiet,
                 cfg.request_timeout_secs,
                 "OpenAI",
                 validation,
@@ -50,10 +51,11 @@ pub fn build_llm_client(cfg: &Config) -> Result<Box<dyn LlmClient>> {
                 cfg.request_timeout_secs
             );
 
-            Ok(Box::new(OllamaClient::new(
+            Ok(Box::new(OllamaClient::with_quiet(
                 base_url,
                 cfg.model.clone(),
                 cfg.stream,
+                cfg.oneline_quiet,
                 cfg.request_timeout_secs,
             )))
         }
@@ -76,6 +78,7 @@ pub fn build_llm_client(cfg: &Config) -> Result<Box<dyn LlmClient>> {
                 cfg.model.clone(),
                 base_url,
                 cfg.stream,
+                cfg.oneline_quiet,
                 cfg.request_timeout_secs,
                 "LM Studio",
                 ModelValidation::List,

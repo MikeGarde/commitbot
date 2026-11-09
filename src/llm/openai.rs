@@ -103,6 +103,9 @@ pub struct OpenAiClient {
     model: String,
     api_base_url: String,
     stream: bool,
+    /// When true, suppress live-printed streaming chunks (still captured
+    /// into the returned string) — used for `--oneline quiet`.
+    quiet: bool,
     /// Name used in logs and error messages (e.g. "OpenAI", "LM Studio").
     provider_label: String,
     model_validation: ModelValidation,
@@ -123,6 +126,7 @@ impl OpenAiClient {
             model,
             api_base_url,
             stream,
+            false,
             timeout_secs,
             "OpenAI",
             ModelValidation::Retrieve,
@@ -133,11 +137,13 @@ impl OpenAiClient {
     ///
     /// `api_key` is optional: LM Studio serves unauthenticated requests by
     /// default, and omitting the key sends no `Authorization` header at all.
+    #[allow(clippy::too_many_arguments)]
     pub fn openai_compatible(
         api_key: Option<String>,
         model: String,
         api_base_url: String,
         stream: bool,
+        quiet: bool,
         timeout_secs: u64,
         provider_label: impl Into<String>,
         model_validation: ModelValidation,
@@ -153,6 +159,7 @@ impl OpenAiClient {
             model,
             api_base_url: normalize_base_url(&api_base_url),
             stream,
+            quiet,
             provider_label: provider_label.into(),
             model_validation,
             usage: Mutex::new(TokenUsage::default()),
@@ -274,7 +281,7 @@ impl OpenAiClient {
         }
 
         let reader = BufReader::new(resp);
-        let result = read_stream_to_string(reader, parse_stream_line);
+        let result = read_stream_to_string(reader, self.quiet, parse_stream_line);
         log::debug!(
             "{} streaming response time: {:.2?}",
             self.provider_label,
@@ -699,6 +706,7 @@ mod tests {
             None,
             "qwen/qwen3-coder-30b".into(),
             base_url.into(),
+            false,
             false,
             90,
             "LM Studio",

@@ -56,6 +56,9 @@ pub struct OllamaClient {
     base_url: String,
     model: String,
     stream: bool,
+    /// When true, suppress live-printed streaming chunks (still captured
+    /// into the returned string) — used for `--oneline quiet`.
+    quiet: bool,
     usage: Mutex<TokenUsage>,
 }
 
@@ -68,6 +71,16 @@ struct TokenUsage {
 
 impl OllamaClient {
     pub fn new(base_url: impl Into<String>, model: impl Into<String>, stream: bool, timeout_secs: u64) -> Self {
+        Self::with_quiet(base_url, model, stream, false, timeout_secs)
+    }
+
+    pub fn with_quiet(
+        base_url: impl Into<String>,
+        model: impl Into<String>,
+        stream: bool,
+        quiet: bool,
+        timeout_secs: u64,
+    ) -> Self {
         let http = Client::builder()
             .timeout(std::time::Duration::from_secs(timeout_secs))
             .build()
@@ -77,6 +90,7 @@ impl OllamaClient {
             base_url: base_url.into().trim_end_matches('/').to_string(),
             model: model.into(),
             stream,
+            quiet,
             usage: Mutex::new(TokenUsage::default()),
         }
     }
@@ -132,7 +146,7 @@ impl OllamaClient {
 
         if stream {
             let reader = BufReader::new(resp);
-            let result = read_stream_to_string(reader, parse_stream_line);
+            let result = read_stream_to_string(reader, self.quiet, parse_stream_line);
             log::debug!("Ollama response time: {:.2?}", t0.elapsed());
             return result;
         }

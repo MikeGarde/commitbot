@@ -57,6 +57,89 @@ fn dimmed(text: &str) -> String {
     format!("\x1b[2m{text}\x1b[0m")
 }
 
+/// Print `s` only when `--oneline quiet` hasn't asked for silence.
+macro_rules! readable_println {
+    ($cfg:expr) => {
+        if !$cfg.oneline_quiet {
+            println!();
+        }
+    };
+    ($cfg:expr, $($arg:tt)*) => {
+        if !$cfg.oneline_quiet {
+            println!($($arg)*);
+        }
+    };
+}
+
+/// Flatten a generated message onto one line by escaping real newlines as the
+/// two-character sequence `\n`, and append the LLM stats when available.
+fn oneline_summary(cfg: &Config, msg: &str, usage: Option<(u64, u64, u64)>) -> String {
+    let mut flat = String::with_capacity(msg.len());
+    for ch in msg.trim().chars() {
+        match ch {
+            '\n' => flat.push_str("\\n"),
+            '\r' => {}
+            _ => flat.push(ch),
+        }
+    }
+
+    if let Some((p, c, t)) = usage {
+        flat.push_str(&format!(
+            " [{} {} | tokens prompt={} completion={} total={}]",
+            cfg.provider, cfg.model, p, c, t
+        ));
+    }
+
+    flat
+}
+
+/// Run `generate`, print it the normal (readable) way unless `--oneline quiet`
+/// was passed, then optionally emit a trailing one-line summary when
+/// `--oneline` (in either mode) was passed.
+///
+/// Streaming's live chunk-printing already happens (or is suppressed) inside
+/// the LLM client itself, based on the same quiet setting, so this function
+/// only needs to print the message when *not* streaming.
+fn generate_and_report(
+    cfg: &Config,
+    llm: &dyn LlmClient,
+    print_stats: bool,
+    generate: impl FnOnce() -> Result<String>,
+) -> Result<String> {
+    readable_println!(cfg);
+
+    let t0 = std::time::Instant::now();
+    let msg = generate()?;
+    let elapsed = t0.elapsed();
+
+    let usage = llm.take_and_reset_usage();
+
+    if !cfg.oneline_quiet {
+        // Streaming already printed the message live; just make sure the
+        // cursor ends up on a fresh line before the footer.
+        if !cfg.stream {
+            print!("{msg}");
+        }
+        if !msg.ends_with('\n') {
+            println!();
+        }
+
+        println!();
+        if print_stats && let Some((p, c, t)) = usage {
+            println!("Provider: {} {}", cfg.provider, cfg.model);
+            println!("Tokens:   prompt={}, completion={}, total={}", p, c, t);
+        }
+        println!("Time:     {elapsed:.2?}");
+    }
+
+    if cfg.oneline {
+        readable_println!(cfg);
+        println!("{}", oneline_summary(cfg, &msg, usage));
+    }
+
+    Ok(msg)
+}
+
 fn categorize_file_interactive(idx: usize, total: usize, path: &str) -> Result<FileCategory> {
     use FileCategory::*;
 
@@ -354,8 +437,8 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
         });
     }
 
-    println!();
-    println!("Asking {}...", cfg.model);
+    readable_println!(cfg);
+    readable_println!(cfg, "Asking {}...", cfg.model);
 
     let total = file_changes.len();
     let mp = MultiProgress::new();
@@ -429,28 +512,9 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     pb.inc(1);
     pb.finish_with_message("Done");
 
-    println!();
-
-    if cfg.stream {
-        let _msg = llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())?;
-    } else {
-        let t0 = std::time::Instant::now();
-        let msg = llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())?;
-        let elapsed = t0.elapsed();
-        if msg.ends_with('\n') {
-            print!("{msg}");
-        } else {
-            println!("{msg}");
-        }
-        println!("Commit message generated in {elapsed:.2?}");
-    }
-
-    println!();
-    if let Some((p, c, t)) = llm.take_and_reset_usage() {
-        println!();
-        println!("Provider: {} {}", cfg.provider, cfg.model );
-        println!("Tokens:   prompt={}, completion={}, total={}", p, c, t);
-    }
+    generate_and_report(cfg, llm, true, || {
+        llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())
+    })?;
 
     Ok(())
 }
@@ -497,11 +561,11 @@ fn run_auto(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
         })
         .collect();
 
-    println!();
-    println!("Asking {}...", cfg.model);
+    readable_println!(cfg);
+    readable_println!(cfg, "Asking {}...", cfg.model);
     if let Some(ref diff_arg) = cli.diff {
         let diff_source = if diff_arg == "-" { "stdin" } else { diff_arg };
-        println!("Using external diff: {diff_source}");
+        readable_println!(cfg, "Using external diff: {diff_source}");
     }
 
     let total = file_changes.len();
@@ -572,31 +636,11 @@ fn run_auto(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     pb.inc(1);
     pb.finish_with_message("Done");
 
-    println!();
-
-    if cfg.stream {
-        let _msg = llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())?;
-    } else {
-        let t0 = std::time::Instant::now();
-        let msg = llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())?;
-        let elapsed = t0.elapsed();
-        if msg.ends_with('\n') {
-            print!("{msg}");
-        } else {
-            println!("{msg}");
-        }
-        println!("Commit message generated in {elapsed:.2?}");
-    }
-
-    println!();
-    if let Some((p, c, t)) = llm.take_and_reset_usage() {
-        println!();
-        println!("Provider: {} {}", cfg.provider, cfg.model );
-        println!("Tokens:   prompt={}, completion={}, total={}", p, c, t);
-    }
+    generate_and_report(cfg, llm, true, || {
+        llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())
+    })?;
 
     Ok(())
-
 }
 fn run_pr(
     cli: &Cli,
@@ -645,33 +689,14 @@ fn run_pr(
     log::info!("Found {} commits in range.", items.len());
 
     let ticket_summary = resolved_ticket_summary(cli);
-    let _pr_message = if cfg.stream {
-        println!();
-        let t0 = std::time::Instant::now();
-        let msg =
-            llm.generate_pr_message(base, &from_branch, mode, &items, ticket_summary.as_deref())?;
-        println!("\nPR message generated in {:.2?}", t0.elapsed());
-        msg
-        } else {
-        println!();
-        let t0 = std::time::Instant::now();
-        let msg =
-            llm.generate_pr_message(base, &from_branch, mode, &items, ticket_summary.as_deref())?;
-        let elapsed = t0.elapsed();
-
-        if msg.ends_with('\n') {
-            print!("{msg}");
-        } else {
-            println!("{msg}");
-        }
-        println!("PR message generated in {elapsed:.2?}");
-        msg
-    };
+    generate_and_report(cfg, llm, false, || {
+        llm.generate_pr_message(base, &from_branch, mode, &items, ticket_summary.as_deref())
+    })?;
 
     let appendix = format_pr_commit_appendix(&items);
     if !appendix.is_empty() {
-        println!();
-        println!("{appendix}");
+        readable_println!(cfg);
+        readable_println!(cfg, "{appendix}");
     }
 
     Ok(())
