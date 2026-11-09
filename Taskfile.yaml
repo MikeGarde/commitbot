@@ -54,7 +54,7 @@ tasks:
     desc: "Install commitbot binary locally via cargo install --path ."
     cmds:
       - brew uninstall mikegarde/tap/commitbot || true
-      - cargo install --path . --force
+      - cargo install --path . --force --locked
 
   install:brew:
     desc: "Install commitbot via Homebrew (macOS)"
