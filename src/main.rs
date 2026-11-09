@@ -97,13 +97,16 @@ fn oneline_summary(cfg: &Config, msg: &str, usage: Option<(u64, u64, u64)>) -> S
 /// was passed, then optionally emit a trailing one-line summary when
 /// `--oneline` (in either mode) was passed.
 ///
+/// `appendix` is extra readable text (e.g. the PR commit list) printed between
+/// the message and the Provider/Tokens/Time footer, so the footer is always last.
+///
 /// Streaming's live chunk-printing already happens (or is suppressed) inside
 /// the LLM client itself, based on the same quiet setting, so this function
 /// only needs to print the message when *not* streaming.
 fn generate_and_report(
     cfg: &Config,
     llm: &dyn LlmClient,
-    print_stats: bool,
+    appendix: &str,
     generate: impl FnOnce() -> Result<String>,
 ) -> Result<String> {
     readable_println!(cfg);
@@ -124,8 +127,13 @@ fn generate_and_report(
             println!();
         }
 
+        if !appendix.is_empty() {
+            println!();
+            println!("{appendix}");
+        }
+
         println!();
-        if print_stats && let Some((p, c, t)) = usage {
+        if let Some((p, c, t)) = usage {
             println!("Provider: {} {}", cfg.provider, cfg.model);
             println!("Tokens:   prompt={}, completion={}, total={}", p, c, t);
         }
@@ -512,7 +520,7 @@ fn run_interactive(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     pb.inc(1);
     pb.finish_with_message("Done");
 
-    generate_and_report(cfg, llm, true, || {
+    generate_and_report(cfg, llm, "", || {
         llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())
     })?;
 
@@ -636,7 +644,7 @@ fn run_auto(cli: &Cli, cfg: &Config, llm: &dyn LlmClient) -> Result<()> {
     pb.inc(1);
     pb.finish_with_message("Done");
 
-    generate_and_report(cfg, llm, true, || {
+    generate_and_report(cfg, llm, "", || {
         llm.generate_commit_message(&branch, &file_changes, ticket_summary.as_deref())
     })?;
 
@@ -689,15 +697,10 @@ fn run_pr(
     log::info!("Found {} commits in range.", items.len());
 
     let ticket_summary = resolved_ticket_summary(cli);
-    generate_and_report(cfg, llm, false, || {
+    let appendix = format_pr_commit_appendix(&items);
+    generate_and_report(cfg, llm, &appendix, || {
         llm.generate_pr_message(base, &from_branch, mode, &items, ticket_summary.as_deref())
     })?;
-
-    let appendix = format_pr_commit_appendix(&items);
-    if !appendix.is_empty() {
-        readable_println!(cfg);
-        readable_println!(cfg, "{appendix}");
-    }
 
     Ok(())
 }
@@ -751,5 +754,52 @@ fn main() -> Result<()> {
                 run_auto(&cli, &cfg, boxed_client.as_ref())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_config() -> Config {
+        Config {
+            provider: "lmstudio".into(),
+            openai_api_key: None,
+            base_url: None,
+            model: "test-model".into(),
+            max_concurrent_requests: 1,
+            stream: false,
+            request_timeout_secs: 5,
+            max_diff_bytes: 1_000,
+            oneline: true,
+            oneline_quiet: false,
+        }
+    }
+
+    #[test]
+    fn oneline_summary_escapes_newlines_and_appends_stats() {
+        let cfg = test_config();
+        let flat = oneline_summary(&cfg, "Subject\n\n- one\n- two", Some((10, 20, 30)));
+
+        assert_eq!(
+            flat,
+            "Subject\\n\\n- one\\n- two [lmstudio test-model | tokens prompt=10 completion=20 total=30]"
+        );
+        assert!(!flat.contains('\n'));
+    }
+
+    #[test]
+    fn oneline_summary_without_usage_has_no_stats_suffix() {
+        let cfg = test_config();
+        assert_eq!(oneline_summary(&cfg, "Subject\n- body", None), "Subject\\n- body");
+    }
+
+    #[test]
+    fn oneline_summary_trims_and_drops_carriage_returns() {
+        let cfg = test_config();
+        assert_eq!(
+            oneline_summary(&cfg, "\n  Subject\r\n- body\r\n\n", None),
+            "Subject\\n- body"
+        );
     }
 }

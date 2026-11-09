@@ -216,3 +216,45 @@ url = "http://192.168.1.16:1234/v1"
 
     fs::remove_file(config_path).ok();
 }
+
+fn cfg_for(args: &[&str]) -> Config {
+    let missing = unique_config_path("oneline");
+    // ollama needs no API key, so this works regardless of the environment.
+    let mut argv = vec![
+        "commitbot",
+        "--config",
+        missing.to_str().expect("utf-8 path"),
+        "--provider",
+        "ollama",
+    ];
+    argv.extend_from_slice(args);
+    Config::from_sources(&Cli::parse_from(argv)).expect("config should resolve")
+}
+
+#[test]
+fn oneline_is_off_by_default() {
+    let cfg = cfg_for(&[]);
+    assert!(!cfg.oneline);
+    assert!(!cfg.oneline_quiet);
+}
+
+#[test]
+fn bare_oneline_keeps_readable_output() {
+    let cfg = cfg_for(&["--oneline"]);
+    assert!(cfg.oneline);
+    assert!(!cfg.oneline_quiet);
+}
+
+#[test]
+fn oneline_quiet_suppresses_readable_output() {
+    let cfg = cfg_for(&["--oneline", "quiet"]);
+    assert!(cfg.oneline);
+    assert!(cfg.oneline_quiet);
+}
+
+#[test]
+fn oneline_with_any_other_mode_stays_readable() {
+    let cfg = cfg_for(&["--oneline", "readable"]);
+    assert!(cfg.oneline);
+    assert!(!cfg.oneline_quiet);
+}

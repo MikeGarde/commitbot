@@ -241,15 +241,20 @@ impl OpenAiClient {
             .ok_or_else(|| anyhow!("no content returned from {}", self.provider_label))?;
 
         if let Some(usage) = &chat_resp.usage {
-            // Recover from a poisoned mutex instead of panicking so the CLI
-            // can continue in the face of concurrent thread panics.
-            let mut u = self.usage.lock().unwrap_or_else(|e| e.into_inner());
-            u.prompt_tokens += usage.prompt_tokens as u64;
-            u.completion_tokens += usage.completion_tokens as u64;
-            u.total_tokens += usage.total_tokens as u64;
+            self.record_usage(usage);
         }
 
         Ok(content)
+    }
+
+    /// Add a response's token counts to the running totals.
+    fn record_usage(&self, usage: &ChatUsage) {
+        // Recover from a poisoned mutex instead of panicking so the CLI
+        // can continue in the face of concurrent thread panics.
+        let mut u = self.usage.lock().unwrap_or_else(|e| e.into_inner());
+        u.prompt_tokens += usage.prompt_tokens as u64;
+        u.completion_tokens += usage.completion_tokens as u64;
+        u.total_tokens += usage.total_tokens as u64;
     }
 
     fn call_chat_streaming(&self, req: &ChatRequest) -> Result<String> {
@@ -257,10 +262,15 @@ impl OpenAiClient {
 
         log::info!("Streaming {} model {:?}", self.provider_label, req.model);
 
+        // Streamed responses only carry token usage (in a final chunk) when
+        // asked to.
+        let mut body = serde_json::to_value(req).context("failed to encode streaming request")?;
+        body["stream_options"] = serde_json::json!({ "include_usage": true });
+
         let t0 = std::time::Instant::now();
         let resp = self
             .authed(self.client.post(&url))
-            .json(req)
+            .json(&body)
             .send()
             .with_context(|| {
                 format!(
@@ -281,7 +291,12 @@ impl OpenAiClient {
         }
 
         let reader = BufReader::new(resp);
-        let result = read_stream_to_string(reader, self.quiet, parse_stream_line);
+        let result = read_stream_to_string(reader, self.quiet, |line| {
+            if let Some(usage) = parse_stream_usage(line) {
+                self.record_usage(&usage);
+            }
+            parse_stream_line(line)
+        });
         log::debug!(
             "{} streaming response time: {:.2?}",
             self.provider_label,
@@ -445,6 +460,20 @@ pub fn matches_model_id(configured: &str, candidate: &str) -> bool {
     let conf_clean = clean_model_name(conf_base);
     let cand_clean = clean_model_name(cand_base);
     conf_clean.eq_ignore_ascii_case(cand_clean)
+}
+
+#[derive(Deserialize)]
+struct StreamUsageChunk {
+    usage: Option<ChatUsage>,
+}
+
+/// Token usage from the final streamed chunk, when the server sends one.
+fn parse_stream_usage(line: &str) -> Option<ChatUsage> {
+    let data = line.trim_start().strip_prefix("data:")?.trim();
+    if data == "[DONE]" {
+        return None;
+    }
+    serde_json::from_str::<StreamUsageChunk>(data).ok()?.usage
 }
 
 fn parse_stream_line(line: &str) -> Result<Option<String>> {
@@ -668,6 +697,24 @@ fn truncate(s: &str, max_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_usage_from_the_final_stream_chunk() {
+        let usage = parse_stream_usage(
+            r#"data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}"#,
+        )
+        .expect("usage chunk");
+        assert_eq!((usage.prompt_tokens, usage.completion_tokens, usage.total_tokens), (3, 4, 7));
+    }
+
+    #[test]
+    fn stream_usage_ignores_content_chunks_done_and_garbage() {
+        assert!(parse_stream_usage(r#"data: {"choices":[{"delta":{"content":"hi"}}]}"#).is_none());
+        assert!(parse_stream_usage(r#"data: {"choices":[{"delta":{"content":"hi"}}],"usage":null}"#).is_none());
+        assert!(parse_stream_usage("data: [DONE]").is_none());
+        assert!(parse_stream_usage("data: not json").is_none());
+        assert!(parse_stream_usage(": keep-alive").is_none());
+    }
 
     #[test]
     fn builds_model_url_from_root_base() {

@@ -28,6 +28,11 @@ struct OllamaChatResponse {
 struct OllamaStreamResponse {
     message: Option<OllamaMessage>,
     done: Option<bool>,
+    /// Token counts, reported only on the final (`done`) chunk.
+    #[musli(default)]
+    prompt_eval_count: Option<u32>,
+    #[musli(default)]
+    eval_count: Option<u32>,
 }
 
 #[derive(Debug, Decode)]
@@ -146,7 +151,15 @@ impl OllamaClient {
 
         if stream {
             let reader = BufReader::new(resp);
-            let result = read_stream_to_string(reader, self.quiet, parse_stream_line);
+            let result = read_stream_to_string(reader, self.quiet, |line| {
+                if let Some((prompt, completion)) = parse_stream_usage(line) {
+                    let mut u = self.usage.lock().unwrap_or_else(|e| e.into_inner());
+                    u.prompt_tokens += prompt;
+                    u.completion_tokens += completion;
+                    u.total_tokens += prompt + completion;
+                }
+                parse_stream_line(line)
+            });
             log::debug!("Ollama response time: {:.2?}", t0.elapsed());
             return result;
         }
@@ -195,6 +208,17 @@ impl OllamaClient {
     fn tags_url(&self) -> String {
         format!("{}/api/tags", self.base_url)
     }
+}
+
+/// (prompt, completion) token counts from a final streamed chunk, if present.
+fn parse_stream_usage(line: &str) -> Option<(u64, u64)> {
+    let parsed: OllamaStreamResponse = json::from_str(line).ok()?;
+    if !parsed.done.unwrap_or(false) {
+        return None;
+    }
+    let prompt = parsed.prompt_eval_count? as u64;
+    let completion = parsed.eval_count.unwrap_or(0) as u64;
+    Some((prompt, completion))
 }
 
 fn parse_stream_line(line: &str) -> Result<Option<String>> {
@@ -309,5 +333,22 @@ mod tests {
             .models
             .iter()
             .any(|model| model.name == "missing:model"));
+    }
+
+    #[test]
+    fn reads_token_counts_from_the_final_stream_chunk() {
+        let line = r#"{"message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":12,"eval_count":5}"#;
+        assert_eq!(parse_stream_usage(line), Some((12, 5)));
+    }
+
+    #[test]
+    fn stream_usage_is_none_until_the_final_chunk() {
+        let mid = r#"{"message":{"role":"assistant","content":"hi"},"done":false}"#;
+        assert_eq!(parse_stream_usage(mid), None);
+
+        let done_without_counts = r#"{"message":{"role":"assistant","content":""},"done":true}"#;
+        assert_eq!(parse_stream_usage(done_without_counts), None);
+
+        assert_eq!(parse_stream_usage("not json"), None);
     }
 }
